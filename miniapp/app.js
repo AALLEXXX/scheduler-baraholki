@@ -1,5 +1,6 @@
 const tg = window.Telegram?.WebApp;
 const initData = tg?.initData || "";
+const apiBase = window.location.pathname.startsWith("/scheduler") ? "/scheduler/api" : "/api";
 
 if (tg) {
   tg.ready();
@@ -20,7 +21,8 @@ function headers() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const response = await fetch(`${apiBase}${cleanPath}`, {
     ...options,
     headers: { ...headers(), ...(options.headers || {}) },
   });
@@ -84,9 +86,9 @@ function render() {
 async function load() {
   document.querySelector("#status").textContent = "Loading...";
   const [sessions, chats, posts] = await Promise.all([
-    api("/api/sessions"),
-    api("/api/chats"),
-    api("/api/posts"),
+    api("sessions"),
+    api("chats"),
+    api("posts"),
   ]);
   state.sessions = sessions;
   state.chats = chats;
@@ -109,7 +111,7 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
     (input) => input.value,
   );
 
-  await api("/api/posts", {
+  await api("posts", {
     method: "POST",
     body: JSON.stringify({
       title: form.get("title"),
