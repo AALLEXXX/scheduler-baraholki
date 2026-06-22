@@ -176,8 +176,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px 14px;
 }
 
 .status-panel > div {
@@ -186,6 +186,7 @@ button:disabled {
   column-gap: 10px;
   row-gap: 2px;
   align-items: center;
+  min-width: 0;
 }
 
 .status-dot {
@@ -204,19 +205,29 @@ button:disabled {
 
 #account-title {
   font-weight: 800;
+  min-width: 0;
 }
 
 #account-subtitle {
   color: var(--muted);
   font-size: 13px;
   font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   justify-content: flex-end;
+}
+
+#logout-account {
+  min-height: 36px;
+  padding: 0 14px;
 }
 
 .panel {
@@ -762,11 +773,6 @@ textarea {
   .panel-heading {
     grid-template-columns: 1fr;
     display: grid;
-  }
-
-  .status-panel {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .draft-card,

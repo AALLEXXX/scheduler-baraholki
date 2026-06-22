@@ -352,7 +352,7 @@ function render() {
     ? `${primarySession.phone || ""} ${primarySession.username ? `@${primarySession.username}` : ""}`.trim()
     : "Подключите Telegram-аккаунт для отправки";
 
-  document.querySelector("#connect-panel").hidden = hasAccount;
+  document.querySelector("#connect-panel").hidden = hasAccount || state.activeTab !== "posts";
   document.querySelector("#logout-account").hidden = !hasAccount;
   document.querySelector("#compose-hint").textContent = hasAccount
     ? hasGroups
