@@ -709,6 +709,7 @@ function renderEditFolderPicker() {
       button.addEventListener("click", () => {
         state.editSelectedFolderId = String(folder.id);
         state.editGroupPage = 1;
+        renderEditFolderPicker();
         renderEditGroupPicker();
       });
       return button;

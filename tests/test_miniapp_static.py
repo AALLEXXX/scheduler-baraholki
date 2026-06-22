@@ -183,6 +183,7 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "sortSelectedFirst" in js
     assert "selectedIds = state.selectedChatIds" in js
     assert "selectedIds: state.editSelectedChatIds" in js
+    assert "renderEditFolderPicker();" in js
     assert ".pagination" in css
     assert "[hidden]" in css
 
