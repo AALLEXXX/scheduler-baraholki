@@ -289,7 +289,8 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
                 }
             )
 
-        folders = await client(functions.messages.GetDialogFiltersRequest())
+        folder_response = await client(functions.messages.GetDialogFiltersRequest())
+        folders = getattr(folder_response, "filters", folder_response)
         rows: list[dict[str, object]] = []
         for folder in folders:
             if not isinstance(folder, types.DialogFilter):

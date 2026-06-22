@@ -317,24 +317,26 @@ def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, d
 
         async def __call__(self, request):
             assert request.__class__.__name__ == "GetDialogFiltersRequest"
-            return [
-                types.DialogFilterDefault(),
-                types.DialogFilter(
-                    id=4,
-                    title=types.TextWithEntities(text="Барахолки", entities=[]),
-                    pinned_peers=[],
-                    include_peers=[types.InputPeerChannel(123, 0)],
-                    exclude_peers=[],
-                ),
-                types.DialogFilter(
-                    id=5,
-                    title=types.TextWithEntities(text="Все группы", entities=[]),
-                    pinned_peers=[],
-                    include_peers=[],
-                    exclude_peers=[types.InputPeerChannel(456, 0)],
-                    groups=True,
-                ),
-            ]
+            return types.messages.DialogFilters(
+                filters=[
+                    types.DialogFilterDefault(),
+                    types.DialogFilter(
+                        id=4,
+                        title=types.TextWithEntities(text="Барахолки", entities=[]),
+                        pinned_peers=[],
+                        include_peers=[types.InputPeerChannel(123, 0)],
+                        exclude_peers=[],
+                    ),
+                    types.DialogFilter(
+                        id=5,
+                        title=types.TextWithEntities(text="Все группы", entities=[]),
+                        pinned_peers=[],
+                        include_peers=[],
+                        exclude_peers=[types.InputPeerChannel(456, 0)],
+                        groups=True,
+                    ),
+                ]
+            )
 
     fake_client = FolderClient()
     monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
