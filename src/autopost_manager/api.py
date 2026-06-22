@@ -128,6 +128,30 @@ def cancel_pending_jobs(post: Post, db: Session) -> int:
     return len(jobs)
 
 
+def active_account(
+    *,
+    telegram_user_id: int,
+    db: Session,
+) -> TelegramSession | None:
+    return db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+        .where(TelegramSession.status == SessionStatus.active)
+        .order_by(TelegramSession.updated_at.desc())
+    ).first()
+
+
+def require_active_account(
+    *,
+    telegram_user_id: int,
+    db: Session,
+) -> TelegramSession:
+    session = active_account(telegram_user_id=telegram_user_id, db=db)
+    if not session:
+        raise HTTPException(status_code=409, detail="Сначала подключите Telegram-аккаунт")
+    return session
+
+
 async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteResult:
     result = BotMessageDeleteResult()
     if not refs:
@@ -236,7 +260,11 @@ def validate_owned_session_and_targets(
 ) -> None:
     if session_id:
         session = db.get(TelegramSession, session_id)
-        if not session or session.owner_telegram_id != telegram_user_id:
+        if (
+            not session
+            or session.owner_telegram_id != telegram_user_id
+            or session.status != SessionStatus.active
+        ):
             raise HTTPException(status_code=404, detail="Telegram account not found")
 
     for target_chat_id in target_chat_ids:
@@ -417,6 +445,16 @@ def logout_account(
     for chat in chats:
         chat.enabled = False
 
+    posts = list(
+        db.scalars(
+            select(Post).where(Post.created_by_telegram_id == telegram_user_id)
+        ).unique()
+    )
+    for post in posts:
+        if post.status == PostStatus.scheduled:
+            post.status = PostStatus.paused
+        cancel_pending_jobs(post, db)
+
     db.commit()
     return AccountLogoutOut(revoked_sessions=len(sessions), disabled_chats=len(chats))
 
@@ -557,6 +595,9 @@ def list_posts(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[PostOut]:
+    if not active_account(telegram_user_id=telegram_user_id, db=db):
+        return []
+
     posts = (
         db.scalars(
             select(Post)
@@ -613,6 +654,7 @@ def schedule_post(
     post = db.get(Post, post_id)
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+    require_active_account(telegram_user_id=telegram_user_id, db=db)
 
     validate_post_schedule(
         schedule_kind=payload.schedule_kind,
@@ -654,6 +696,7 @@ def pause_post(
     post = db.get(Post, post_id)
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+    require_active_account(telegram_user_id=telegram_user_id, db=db)
     if post.status not in {PostStatus.scheduled, PostStatus.paused}:
         raise HTTPException(status_code=409, detail="Можно поставить на паузу только пост из очереди")
 
@@ -674,6 +717,7 @@ def resume_post(
     post = db.get(Post, post_id)
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+    require_active_account(telegram_user_id=telegram_user_id, db=db)
     if post.status != PostStatus.paused:
         raise HTTPException(status_code=409, detail="Пост не на паузе")
 
@@ -697,6 +741,7 @@ async def delete_post(
     post = db.get(Post, post_id)
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+    require_active_account(telegram_user_id=telegram_user_id, db=db)
 
     message_refs = collect_source_message_refs(post)
     match_texts = {post.body}
@@ -736,6 +781,7 @@ def enqueue_now(
     post = db.get(Post, post_id)
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+    require_active_account(telegram_user_id=telegram_user_id, db=db)
 
     count = 0
     for target in post.targets:
@@ -757,6 +803,9 @@ def list_jobs(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[PublishJob]:
+    if not active_account(telegram_user_id=telegram_user_id, db=db):
+        return []
+
     return list(
         db.scalars(
             select(PublishJob)

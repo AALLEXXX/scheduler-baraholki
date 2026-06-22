@@ -447,7 +447,9 @@ def test_logout_revokes_sessions_hides_chats_and_deletes_session_files(
     session_file.write_text("secret", encoding="utf-8")
     session = make_session(db_session, owner_id=111)
     session.session_path = str(session_file)
-    make_chat(db_session, session, title="Visible group")
+    chat = make_chat(db_session, session, title="Visible group")
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    pending_job = make_job(db_session, post, chat, session=session, status=JobStatus.pending)
     other_session = make_session(db_session, owner_id=222)
     make_chat(db_session, other_session, title="Other group")
     db_session.commit()
@@ -460,6 +462,34 @@ def test_logout_revokes_sessions_hides_chats_and_deletes_session_files(
     assert not session_file.exists()
     assert client.get("/api/sessions").json()[0]["status"] == "revoked"
     assert client.get("/api/chats").json() == []
+    assert client.get("/api/posts").json() == []
+    assert client.get("/api/jobs").json() == []
+    assert client.patch(f"/api/posts/{post.id}/pause").status_code == 409
+
+    db_session.refresh(post)
+    db_session.refresh(pending_job)
+    assert post.status == PostStatus.paused
+    assert pending_job.status == JobStatus.cancelled
+
+
+def test_queue_actions_require_active_account(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111, status=SessionStatus.revoked)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    db_session.commit()
+    auth_user(111)
+
+    assert client.get("/api/posts").json() == []
+    assert client.get("/api/jobs").json() == []
+
+    for response in [
+        client.patch(f"/api/posts/{post.id}/pause"),
+        client.patch(f"/api/posts/{post.id}/resume", json={}),
+        client.post(f"/api/posts/{post.id}/enqueue-now"),
+        client.delete(f"/api/posts/{post.id}"),
+    ]:
+        assert response.status_code == 409
+        assert "Сначала подключите" in response.text
 
 
 def test_sync_chats_rejects_foreign_session_and_telegram_runtime_error(
