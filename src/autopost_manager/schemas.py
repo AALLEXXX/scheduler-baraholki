@@ -99,7 +99,10 @@ class AccountLogoutOut(BaseModel):
 class DeletePostOut(BaseModel):
     ok: bool
     deleted_jobs: int
+    source_messages_found: int
+    telegram_delete_attempted: int
     deleted_bot_messages: int
+    telegram_delete_errors: list[str] = Field(default_factory=list)
 
 
 class PostMediaOut(BaseModel):

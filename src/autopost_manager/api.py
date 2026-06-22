@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import uuid
 from pathlib import Path
 
@@ -62,6 +63,13 @@ if miniapp_dir.exists():
     app.mount("/miniapp", StaticFiles(directory=miniapp_dir, html=True), name="miniapp")
 
 
+@dataclass
+class BotMessageDeleteResult:
+    attempted: int = 0
+    deleted: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
 def post_to_out(post: Post) -> PostOut:
     return PostOut(
         id=post.id,
@@ -92,22 +100,24 @@ def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
     return refs
 
 
-async def delete_bot_messages(refs: set[tuple[int, int]]) -> int:
+async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteResult:
+    result = BotMessageDeleteResult()
     if not refs:
-        return 0
+        return result
 
     bot = Bot(token=get_settings().bot_token)
-    deleted = 0
     try:
         for chat_id, message_id in refs:
+            result.attempted += 1
             try:
                 await bot.delete_message(chat_id=chat_id, message_id=message_id)
-            except Exception:
+            except Exception as exc:
+                result.errors.append(f"{chat_id}/{message_id}: {exc}")
                 continue
-            deleted += 1
+            result.deleted += 1
     finally:
         await bot.session.close()
-    return deleted
+    return result
 
 
 def validate_post_schedule(
@@ -522,11 +532,15 @@ async def delete_post(
         db.delete(job)
     db.delete(post)
     db.commit()
+    telegram_delete = await delete_bot_messages(message_refs)
 
     return DeletePostOut(
         ok=True,
         deleted_jobs=len(jobs),
-        deleted_bot_messages=await delete_bot_messages(message_refs),
+        source_messages_found=len(message_refs),
+        telegram_delete_attempted=telegram_delete.attempted,
+        deleted_bot_messages=telegram_delete.deleted,
+        telegram_delete_errors=telegram_delete.errors,
     )
 
 

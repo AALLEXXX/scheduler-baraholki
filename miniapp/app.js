@@ -380,6 +380,23 @@ function stripHtml(value) {
   return node.textContent || node.innerText || "";
 }
 
+function deletionMessage(result) {
+  if (result.source_messages_found === 0) {
+    return "Пост удалён из сервиса. Для этого поста не был сохранён message_id исходного сообщения, поэтому удалить его в чате нельзя.";
+  }
+
+  if (result.deleted_bot_messages === result.source_messages_found) {
+    return `Пост удалён. В чате Telegram удалено сообщений: ${result.deleted_bot_messages}.`;
+  }
+
+  const firstError = result.telegram_delete_errors?.[0];
+  if (firstError) {
+    return `Пост удалён из сервиса. Telegram удалил ${result.deleted_bot_messages}/${result.source_messages_found}. Причина: ${firstError}`;
+  }
+
+  return `Пост удалён из сервиса. Telegram подтвердил удаление ${result.deleted_bot_messages}/${result.source_messages_found} сообщений.`;
+}
+
 async function load(options = {}) {
   const [config, sessions, chats, posts] = await Promise.all([
     api("app-config"),
@@ -436,11 +453,7 @@ async function deletePost(postId) {
   state.posts = state.posts.filter((item) => item.id !== postId);
   state.draftPage = clampPage(state.draftPage, draftPosts().length, state.draftPageSize);
   state.queuePage = clampPage(state.queuePage, queuePosts().length, state.queuePageSize);
-  notify(
-    result.deleted_bot_messages > 0
-      ? `Пост удалён. Сообщений в чате удалено: ${result.deleted_bot_messages}.`
-      : "Пост удалён. Telegram мог не разрешить удалить исходное сообщение в чате.",
-  );
+  notify(deletionMessage(result));
   await load();
 }
 

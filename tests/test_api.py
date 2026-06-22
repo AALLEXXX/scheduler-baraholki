@@ -654,9 +654,9 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
 
     calls: list[set[tuple[int, int]]] = []
 
-    async def fake_delete_bot_messages(refs: set[tuple[int, int]]) -> int:
+    async def fake_delete_bot_messages(refs: set[tuple[int, int]]) -> api_module.BotMessageDeleteResult:
         calls.append(refs)
-        return len(refs)
+        return api_module.BotMessageDeleteResult(attempted=len(refs), deleted=len(refs))
 
     monkeypatch.setattr(api_module, "delete_bot_messages", fake_delete_bot_messages)
     auth_user(111)
@@ -664,7 +664,14 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
     response = client.delete(f"/api/posts/{post.id}")
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"ok": True, "deleted_jobs": 1, "deleted_bot_messages": 2}
+    assert response.json() == {
+        "ok": True,
+        "deleted_jobs": 1,
+        "source_messages_found": 2,
+        "telegram_delete_attempted": 2,
+        "deleted_bot_messages": 2,
+        "telegram_delete_errors": [],
+    }
     assert calls == [{(111, 40), (111, 41)}]
 
     with SessionLocal() as db:
@@ -682,7 +689,9 @@ def test_delete_post_is_scoped_to_owner(client, auth_user, db_session, monkeypat
     )
     db_session.commit()
 
-    async def fail_delete_bot_messages(_refs: set[tuple[int, int]]) -> int:
+    async def fail_delete_bot_messages(
+        _refs: set[tuple[int, int]],
+    ) -> api_module.BotMessageDeleteResult:
         raise AssertionError("foreign post should not reach Telegram delete")
 
     monkeypatch.setattr(api_module, "delete_bot_messages", fail_delete_bot_messages)
@@ -714,10 +723,15 @@ def test_delete_bot_messages_is_best_effort_and_closes_session(monkeypatch) -> N
 
     monkeypatch.setattr(api_module, "Bot", FakeBot)
 
-    assert asyncio.run(api_module.delete_bot_messages(set())) == 0
-    deleted = asyncio.run(api_module.delete_bot_messages({(100, 1), (100, 2)}))
+    empty = asyncio.run(api_module.delete_bot_messages(set()))
+    assert empty == api_module.BotMessageDeleteResult()
 
-    assert deleted == 1
+    result = asyncio.run(api_module.delete_bot_messages({(100, 1), (100, 2)}))
+
+    assert result.attempted == 2
+    assert result.deleted == 1
+    assert len(result.errors) == 1
+    assert "telegram refused deletion" in result.errors[0]
     assert ("init", "1234567890:TEST_BOT_TOKEN_VALUE", None) in calls
     assert ("delete", 100, 1) in calls
     assert ("delete", 100, 2) in calls

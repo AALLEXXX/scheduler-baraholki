@@ -75,6 +75,10 @@ def test_miniapp_can_paginate_and_delete_posts() -> None:
     assert "draftPageSize: 5" in js
     assert "queuePageSize: 5" in js
     assert "function deletePost" in js
+    assert "function deletionMessage" in js
+    assert "source_messages_found" in js
+    assert "telegram_delete_errors" in js
+    assert "не был сохранён message_id" in js
     assert 'method: "DELETE"' in js
     assert "confirmDeletePost" in js
     assert ".danger-button" in css
