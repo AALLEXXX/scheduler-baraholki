@@ -11,6 +11,8 @@ from autopost_manager.config import get_settings
 
 def admin_only(message: Message) -> bool:
     settings = get_settings()
+    if settings.app_env == "local" and not settings.admin_ids:
+        return True
     return bool(message.from_user and message.from_user.id in settings.admin_ids)
 
 
