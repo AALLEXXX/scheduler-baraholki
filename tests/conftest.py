@@ -133,6 +133,9 @@ def make_post(
     next_run_at: datetime | None = None,
     interval_minutes: int | None = None,
     body: str = "Post body",
+    source_bot_chat_id: int | None = None,
+    source_bot_message_id: int | None = None,
+    source_media_group_id: str | None = None,
 ) -> Post:
     post = Post(
         title=body[:60],
@@ -146,6 +149,9 @@ def make_post(
         session_strategy="fixed",
         default_session_id=session.id if session else None,
         created_by_telegram_id=owner_id,
+        source_bot_chat_id=source_bot_chat_id,
+        source_bot_message_id=source_bot_message_id,
+        source_media_group_id=source_media_group_id,
     )
     db.add(post)
     db.flush()

@@ -37,8 +37,12 @@ def ensure_runtime_columns() -> None:
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS phone_code_hash VARCHAR(300)",
         "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS owner_telegram_id BIGINT",
         "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true",
+        "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_bot_chat_id BIGINT",
+        "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_bot_message_id BIGINT",
+        "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_media_group_id VARCHAR(120)",
         "CREATE INDEX IF NOT EXISTS ix_telegram_sessions_owner_telegram_id ON telegram_sessions (owner_telegram_id)",
         "CREATE INDEX IF NOT EXISTS ix_target_chats_owner_telegram_id ON target_chats (owner_telegram_id)",
+        "CREATE INDEX IF NOT EXISTS ix_posts_source_media_group_id ON posts (source_media_group_id)",
     ]
     with engine.begin() as connection:
         for statement in statements:

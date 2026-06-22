@@ -56,6 +56,30 @@ def test_miniapp_uses_telegram_drafts_instead_of_free_text_composer() -> None:
     assert "Отправьте пост боту" in js
 
 
+def test_miniapp_can_paginate_and_delete_posts() -> None:
+    html = read("index.html")
+    js = read("app.js")
+    css = read("styles.css")
+
+    for element_id in [
+        "draft-pagination",
+        "drafts-prev",
+        "drafts-next",
+        "posts-pagination",
+        "posts-prev",
+        "posts-next",
+    ]:
+        assert f'id="{element_id}"' in html
+        assert f"#{element_id}" in js
+
+    assert "draftPageSize: 5" in js
+    assert "queuePageSize: 5" in js
+    assert "function deletePost" in js
+    assert 'method: "DELETE"' in js
+    assert "confirmDeletePost" in js
+    assert ".danger-button" in css
+
+
 def test_miniapp_auto_syncs_groups_and_can_logout_account() -> None:
     html = read("index.html")
     js = read("app.js")

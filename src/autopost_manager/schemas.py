@@ -96,6 +96,12 @@ class AccountLogoutOut(BaseModel):
     disabled_chats: int
 
 
+class DeletePostOut(BaseModel):
+    ok: bool
+    deleted_jobs: int
+    deleted_bot_messages: int
+
+
 class PostMediaOut(BaseModel):
     id: uuid.UUID
     media_type: str

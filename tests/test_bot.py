@@ -94,6 +94,8 @@ def test_save_message_as_draft_persists_formatted_text() -> None:
         assert saved.created_by_telegram_id == 111
         assert saved.status == PostStatus.draft
         assert saved.body == "<b>Bold text</b>"
+        assert saved.source_bot_chat_id == 111
+        assert saved.source_bot_message_id == 10
         assert saved.media_items == []
 
 
@@ -115,6 +117,8 @@ def test_save_message_as_draft_persists_photo_media() -> None:
     with SessionLocal() as db:
         saved = db.get(Post, post.id)
         assert saved.body == "<i>Caption</i>"
+        assert saved.source_bot_chat_id == 111
+        assert saved.source_bot_message_id == 11
         [media] = saved.media_items
         assert media.media_type == "photo"
         assert media.file_id == "large"
@@ -148,6 +152,8 @@ def test_save_message_as_draft_groups_album_messages_into_one_post() -> None:
         media = db.query(PostMedia).order_by(PostMedia.order_index).all()
         assert len(posts) == 1
         assert posts[0].body == "<b>Album caption</b>"
+        assert posts[0].source_bot_message_id == 20
+        assert posts[0].source_media_group_id == "album-1"
         assert [item.file_id for item in media] == ["first", "second"]
 
 

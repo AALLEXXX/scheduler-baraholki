@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 import uvicorn
+from aiogram import Bot
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from autopost_manager.schemas import (
     AccountPasswordConfirm,
     AccountStartLogin,
     AppConfigOut,
+    DeletePostOut,
     JobOut,
     PostCreate,
     PostMediaOut,
@@ -79,6 +81,33 @@ def post_to_out(post: Post) -> PostOut:
             for media in sorted(post.media_items, key=lambda item: item.order_index)
         ],
     )
+
+
+def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
+    refs: set[tuple[int, int]] = set()
+    if post.source_bot_chat_id and post.source_bot_message_id:
+        refs.add((post.source_bot_chat_id, post.source_bot_message_id))
+    for media in post.media_items:
+        refs.add((media.source_bot_chat_id, media.source_bot_message_id))
+    return refs
+
+
+async def delete_bot_messages(refs: set[tuple[int, int]]) -> int:
+    if not refs:
+        return 0
+
+    bot = Bot(token=get_settings().bot_token)
+    deleted = 0
+    try:
+        for chat_id, message_id in refs:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                continue
+            deleted += 1
+    finally:
+        await bot.session.close()
+    return deleted
 
 
 def validate_post_schedule(
@@ -475,6 +504,30 @@ def schedule_post(
     db.commit()
     db.refresh(post)
     return post_to_out(post)
+
+
+@app.delete("/api/posts/{post_id}", response_model=DeletePostOut)
+async def delete_post(
+    post_id: uuid.UUID,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> DeletePostOut:
+    post = db.get(Post, post_id)
+    if not post or post.created_by_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    message_refs = collect_source_message_refs(post)
+    jobs = list(db.scalars(select(PublishJob).where(PublishJob.post_id == post.id)))
+    for job in jobs:
+        db.delete(job)
+    db.delete(post)
+    db.commit()
+
+    return DeletePostOut(
+        ok=True,
+        deleted_jobs=len(jobs),
+        deleted_bot_messages=await delete_bot_messages(message_refs),
+    )
 
 
 @app.post("/api/posts/{post_id}/enqueue-now")

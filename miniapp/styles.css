@@ -107,6 +107,18 @@ button:disabled {
   color: var(--text);
 }
 
+.danger-button {
+  border: 1px solid rgba(217, 45, 32, 0.28);
+  background: rgba(217, 45, 32, 0.1);
+  color: var(--danger);
+}
+
+.compact-button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
 .icon-button {
   width: 46px;
   padding: 0;
@@ -282,7 +294,9 @@ textarea {
 
 .draft-card {
   display: grid;
-  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
   width: 100%;
   min-height: 0;
   border: 1px solid var(--line);
@@ -291,11 +305,18 @@ textarea {
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
   color: var(--text);
   text-align: left;
+  cursor: pointer;
 }
 
 .draft-card.selected {
   border-color: color-mix(in srgb, var(--brand) 80%, white);
   box-shadow: 0 0 0 3px rgba(36, 129, 204, 0.16);
+}
+
+.draft-card-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .draft-card strong {
@@ -369,11 +390,19 @@ textarea {
 
 .post-item {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.post-item-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .post-item p {
@@ -401,5 +430,10 @@ textarea {
   .status-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .draft-card,
+  .post-item {
+    grid-template-columns: 1fr;
   }
 }

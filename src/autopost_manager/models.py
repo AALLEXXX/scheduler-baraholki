@@ -114,6 +114,9 @@ class Post(Base):
     session_strategy: Mapped[str] = mapped_column(String(40), default="fixed")
     default_session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))
     created_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_bot_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_bot_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_media_group_id: Mapped[str | None] = mapped_column(String(120), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

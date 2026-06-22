@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-2" />
+    <link rel="stylesheet" href="styles.css?v=20260623-3" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -90,6 +90,11 @@
               <small id="drafts-count">0 постов</small>
             </div>
             <div id="draft-picker" class="draft-list"></div>
+            <div id="draft-pagination" class="pagination" hidden>
+              <button id="drafts-prev" type="button">Назад</button>
+              <span id="drafts-page">1 / 1</span>
+              <button id="drafts-next" type="button">Дальше</button>
+            </div>
           </div>
 
           <div class="form-grid">
@@ -141,8 +146,13 @@
           <p id="posts-count">0 постов</p>
         </div>
         <div id="posts" class="post-list"></div>
+        <div id="posts-pagination" class="pagination" hidden>
+          <button id="posts-prev" type="button">Назад</button>
+          <span id="queue-page">1 / 1</span>
+          <button id="posts-next" type="button">Дальше</button>
+        </div>
       </section>
     </main>
-    <script src="app.js?v=20260623-2"></script>
+    <script src="app.js?v=20260623-3"></script>
   </body>
 </html>

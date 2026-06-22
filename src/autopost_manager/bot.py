@@ -129,6 +129,9 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
                 timezone="Asia/Tbilisi",
                 session_strategy="fixed",
                 created_by_telegram_id=owner_id,
+                source_bot_chat_id=message.chat.id,
+                source_bot_message_id=message.message_id,
+                source_media_group_id=media_group_id,
             )
             db.add(post)
             db.flush()

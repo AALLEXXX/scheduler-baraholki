@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
 from autopost_manager import api as api_module
 from autopost_manager.db import SessionLocal
-from autopost_manager.models import Post, SessionStatus, TargetChat, TargetChatType
+from autopost_manager.models import Post, PostMedia, PublishJob, SessionStatus, TargetChat, TargetChatType
 
-from conftest import make_chat, make_media, make_post, make_session
+from conftest import make_chat, make_job, make_media, make_post, make_session
 
 
 def post_payload(session_id: str, chat_ids: list[str], **overrides):
@@ -628,6 +629,99 @@ def test_schedule_existing_post_rejects_foreign_or_disabled_targets(
         },
     )
     assert foreign.status_code == 404
+
+
+def test_delete_post_removes_queue_rows_and_source_bot_messages(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        source_bot_chat_id=111,
+        source_bot_message_id=40,
+    )
+    make_media(db_session, post, source_bot_message_id=41)
+    make_media(db_session, post, source_bot_message_id=40, order_index=1)
+    make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    calls: list[set[tuple[int, int]]] = []
+
+    async def fake_delete_bot_messages(refs: set[tuple[int, int]]) -> int:
+        calls.append(refs)
+        return len(refs)
+
+    monkeypatch.setattr(api_module, "delete_bot_messages", fake_delete_bot_messages)
+    auth_user(111)
+
+    response = client.delete(f"/api/posts/{post.id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True, "deleted_jobs": 1, "deleted_bot_messages": 2}
+    assert calls == [{(111, 40), (111, 41)}]
+
+    with SessionLocal() as db:
+        assert db.get(Post, post.id) is None
+        assert db.query(PostMedia).count() == 0
+        assert db.query(PublishJob).count() == 0
+
+
+def test_delete_post_is_scoped_to_owner(client, auth_user, db_session, monkeypatch) -> None:
+    post = make_post(
+        db_session,
+        owner_id=222,
+        source_bot_chat_id=222,
+        source_bot_message_id=50,
+    )
+    db_session.commit()
+
+    async def fail_delete_bot_messages(_refs: set[tuple[int, int]]) -> int:
+        raise AssertionError("foreign post should not reach Telegram delete")
+
+    monkeypatch.setattr(api_module, "delete_bot_messages", fail_delete_bot_messages)
+    auth_user(111)
+
+    response = client.delete(f"/api/posts/{post.id}")
+
+    assert response.status_code == 404
+    with SessionLocal() as db:
+        assert db.get(Post, post.id) is not None
+
+
+def test_delete_bot_messages_is_best_effort_and_closes_session(monkeypatch) -> None:
+    calls: list[tuple[str, int | str, int | None]] = []
+
+    class FakeSession:
+        async def close(self) -> None:
+            calls.append(("close", "session", None))
+
+    class FakeBot:
+        def __init__(self, token: str) -> None:
+            calls.append(("init", token, None))
+            self.session = FakeSession()
+
+        async def delete_message(self, *, chat_id: int, message_id: int) -> None:
+            calls.append(("delete", chat_id, message_id))
+            if message_id == 2:
+                raise RuntimeError("telegram refused deletion")
+
+    monkeypatch.setattr(api_module, "Bot", FakeBot)
+
+    assert asyncio.run(api_module.delete_bot_messages(set())) == 0
+    deleted = asyncio.run(api_module.delete_bot_messages({(100, 1), (100, 2)}))
+
+    assert deleted == 1
+    assert ("init", "1234567890:TEST_BOT_TOKEN_VALUE", None) in calls
+    assert ("delete", 100, 1) in calls
+    assert ("delete", 100, 2) in calls
+    assert calls[-1] == ("close", "session", None)
 
 
 def test_enqueue_now_and_jobs_are_scoped_to_owner(client, auth_user, db_session) -> None:

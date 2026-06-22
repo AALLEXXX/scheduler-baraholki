@@ -15,6 +15,10 @@ const state = {
   pendingSessionId: null,
   selectedDraftId: null,
   selectedChatIds: new Set(),
+  draftPage: 1,
+  draftPageSize: 5,
+  queuePage: 1,
+  queuePageSize: 5,
   groupSearch: "",
   groupPage: 1,
   groupPageSize: 10,
@@ -97,9 +101,23 @@ function filteredChats() {
   return state.chats.filter((chat) => chat.title.toLowerCase().includes(query));
 }
 
+function pageCount(total, pageSize) {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function clampPage(page, total, pageSize) {
+  const pages = pageCount(total, pageSize);
+  return Math.min(Math.max(1, page), pages);
+}
+
+function pageSlice(items, page, pageSize) {
+  const start = (page - 1) * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
 function clampGroupPage() {
-  const pages = Math.max(1, Math.ceil(filteredChats().length / state.groupPageSize));
-  state.groupPage = Math.min(Math.max(1, state.groupPage), pages);
+  const pages = pageCount(filteredChats().length, state.groupPageSize);
+  state.groupPage = clampPage(state.groupPage, filteredChats().length, state.groupPageSize);
   return pages;
 }
 
@@ -131,6 +149,31 @@ async function confirmSpamRiskIfNeeded(intervalMinutes) {
   }
 
   return window.confirm(`${message}\n\nПродолжить?`);
+}
+
+async function confirmDeletePost(post) {
+  const isDraft = post.status === "draft";
+  const message = isDraft
+    ? "Черновик исчезнет из миниаппа. Сообщение в чате с ботом тоже будет удалено, если Telegram разрешит."
+    : "Пост будет удалён из очереди. Исходное сообщение в чате с ботом тоже будет удалено, если Telegram разрешит.";
+
+  if (tg?.showPopup) {
+    return new Promise((resolve) => {
+      tg.showPopup(
+        {
+          title: isDraft ? "Удалить черновик?" : "Удалить из очереди?",
+          message,
+          buttons: [
+            { id: "delete", type: "destructive", text: "Удалить" },
+            { id: "cancel", type: "cancel", text: "Отмена" },
+          ],
+        },
+        (buttonId) => resolve(buttonId === "delete"),
+      );
+    });
+  }
+
+  return window.confirm(message);
 }
 
 function render() {
@@ -176,16 +219,22 @@ function render() {
   const posts = document.querySelector("#posts");
   if (queued.length === 0) {
     posts.replaceChildren(emptyPost("Постов пока нет"));
+    renderQueuePagination(queued.length);
   } else {
-    posts.replaceChildren(...queued.map(renderPost));
+    state.queuePage = clampPage(state.queuePage, queued.length, state.queuePageSize);
+    posts.replaceChildren(...pageSlice(queued, state.queuePage, state.queuePageSize).map(renderPost));
+    renderQueuePagination(queued.length);
   }
 }
 
 function renderDraftPicker() {
   const picker = document.querySelector("#draft-picker");
   const drafts = draftPosts();
-  if (!drafts.some((post) => post.id === state.selectedDraftId)) {
-    state.selectedDraftId = drafts[0]?.id || null;
+  state.draftPage = clampPage(state.draftPage, drafts.length, state.draftPageSize);
+  renderDraftPagination(drafts.length);
+  const visibleDrafts = pageSlice(drafts, state.draftPage, state.draftPageSize);
+  if (!visibleDrafts.some((post) => post.id === state.selectedDraftId)) {
+    state.selectedDraftId = visibleDrafts[0]?.id || null;
   }
 
   if (drafts.length === 0) {
@@ -194,24 +243,62 @@ function renderDraftPicker() {
   }
 
   picker.replaceChildren(
-    ...drafts.map((post) => {
-      const card = document.createElement("button");
+    ...visibleDrafts.map((post) => {
+      const card = document.createElement("article");
       card.className = `draft-card ${state.selectedDraftId === post.id ? "selected" : ""}`.trim();
-      card.type = "button";
+      card.role = "button";
+      card.tabIndex = 0;
       card.addEventListener("click", () => {
         state.selectedDraftId = post.id;
         render();
       });
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          state.selectedDraftId = post.id;
+          render();
+        }
+      });
 
       const mediaCount = post.media?.length || 0;
       const preview = post.body ? stripHtml(post.body).slice(0, 180) : "Медиа без текста";
-      card.innerHTML = `<strong></strong><span></span><small></small>`;
+      card.innerHTML = `
+        <div class="draft-card-main">
+          <strong></strong>
+          <span></span>
+          <small></small>
+        </div>
+        <button class="danger-button compact-button" type="button">Удалить</button>
+      `;
       card.querySelector("strong").textContent = post.title || "Пост из Telegram";
       card.querySelector("span").textContent = preview;
       card.querySelector("small").textContent = mediaCount ? `${mediaCount} медиа` : "Текст";
+      card.querySelector("button").addEventListener("click", (event) => {
+        event.stopPropagation();
+        deletePost(post.id).catch((error) => notify(error.message, "error"));
+      });
       return card;
     }),
   );
+}
+
+function renderDraftPagination(total) {
+  const pagination = document.querySelector("#draft-pagination");
+  const pages = pageCount(total, state.draftPageSize);
+  pagination.hidden = total <= state.draftPageSize;
+  document.querySelector("#drafts-page").textContent = `${state.draftPage} / ${pages}`;
+  document.querySelector("#drafts-prev").disabled = state.draftPage <= 1;
+  document.querySelector("#drafts-next").disabled = state.draftPage >= pages;
+}
+
+function renderQueuePagination(total) {
+  const pagination = document.querySelector("#posts-pagination");
+  const pages = pageCount(total, state.queuePageSize);
+  state.queuePage = clampPage(state.queuePage, total, state.queuePageSize);
+  pagination.hidden = total <= state.queuePageSize;
+  document.querySelector("#queue-page").textContent = `${state.queuePage} / ${pages}`;
+  document.querySelector("#posts-prev").disabled = state.queuePage <= 1;
+  document.querySelector("#posts-next").disabled = state.queuePage >= pages;
 }
 
 function renderGroupPicker() {
@@ -272,9 +359,18 @@ function renderPost(post) {
   const preview = cleanBody.length > 120 ? `${cleanBody.slice(0, 120)}...` : cleanBody || "Медиа без текста";
   const when = post.next_run_at ? new Date(post.next_run_at).toLocaleString() : "без даты";
   const media = post.media?.length ? ` · ${post.media.length} медиа` : "";
-  node.innerHTML = `<p></p><span></span>`;
+  node.innerHTML = `
+    <div class="post-item-main">
+      <p></p>
+      <span></span>
+    </div>
+    <button class="danger-button compact-button" type="button">Удалить</button>
+  `;
   node.querySelector("p").textContent = preview;
   node.querySelector("span").textContent = `${post.status} · ${when}${media}`;
+  node.querySelector("button").addEventListener("click", () => {
+    deletePost(post.id).catch((error) => notify(error.message, "error"));
+  });
   return node;
 }
 
@@ -323,6 +419,29 @@ async function syncGroups(options = {}) {
   } finally {
     setBusy(button, false, "Обновить группы");
   }
+}
+
+async function deletePost(postId) {
+  const post = state.posts.find((item) => item.id === postId);
+  if (!post) return;
+
+  clearNotice();
+  const confirmed = await confirmDeletePost(post);
+  if (!confirmed) return;
+
+  const result = await api(`posts/${postId}`, { method: "DELETE" });
+  if (state.selectedDraftId === postId) {
+    state.selectedDraftId = null;
+  }
+  state.posts = state.posts.filter((item) => item.id !== postId);
+  state.draftPage = clampPage(state.draftPage, draftPosts().length, state.draftPageSize);
+  state.queuePage = clampPage(state.queuePage, queuePosts().length, state.queuePageSize);
+  notify(
+    result.deleted_bot_messages > 0
+      ? `Пост удалён. Сообщений в чате удалено: ${result.deleted_bot_messages}.`
+      : "Пост удалён. Telegram мог не разрешить удалить исходное сообщение в чате.",
+  );
+  await load();
 }
 
 document.querySelector("#refresh").addEventListener("click", () => {
@@ -385,6 +504,26 @@ document.querySelector("#groups-prev").addEventListener("click", () => {
 document.querySelector("#groups-next").addEventListener("click", () => {
   state.groupPage += 1;
   renderGroupPicker();
+});
+
+document.querySelector("#drafts-prev").addEventListener("click", () => {
+  state.draftPage -= 1;
+  renderDraftPicker();
+});
+
+document.querySelector("#drafts-next").addEventListener("click", () => {
+  state.draftPage += 1;
+  renderDraftPicker();
+});
+
+document.querySelector("#posts-prev").addEventListener("click", () => {
+  state.queuePage -= 1;
+  render();
+});
+
+document.querySelector("#posts-next").addEventListener("click", () => {
+  state.queuePage += 1;
+  render();
 });
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {
