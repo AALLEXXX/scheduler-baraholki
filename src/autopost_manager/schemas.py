@@ -49,6 +49,11 @@ class PostCreate(BaseModel):
     target_chat_ids: list[uuid.UUID] = []
 
 
+class ChatSyncResult(BaseModel):
+    imported: int
+    total_dialogs: int
+
+
 class PostOut(BaseModel):
     id: uuid.UUID
     title: str

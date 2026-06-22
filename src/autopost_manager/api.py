@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import create_schema, get_db
-from autopost_manager.models import Post, PostTarget, PublishJob, TargetChat, TelegramSession
+from autopost_manager.models import (
+    Post,
+    PostStatus,
+    PostTarget,
+    PublishJob,
+    TargetChat,
+    TargetChatType,
+    TelegramSession,
+)
 from autopost_manager.schemas import (
     JobOut,
     PostCreate,
@@ -19,6 +27,7 @@ from autopost_manager.schemas import (
     TelegramSessionOut,
 )
 from autopost_manager.security import require_admin
+from autopost_manager.telegram_client import list_dialogs_from_session
 
 app = FastAPI(title="Autopost Manager")
 
@@ -47,6 +56,49 @@ def list_sessions(
     return list(db.scalars(select(TelegramSession).order_by(TelegramSession.created_at.desc())))
 
 
+@app.post("/api/sessions/{session_id}/sync-chats")
+async def sync_session_chats(
+    session_id: uuid.UUID,
+    _: int = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    sender_session = db.get(TelegramSession, session_id)
+    if not sender_session:
+        raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    try:
+        dialogs = await list_dialogs_from_session(sender_session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    imported = 0
+    for dialog in dialogs:
+        existing = db.scalars(
+            select(TargetChat)
+            .where(TargetChat.session_id == sender_session.id)
+            .where(TargetChat.telegram_chat_id == dialog["telegram_chat_id"])
+        ).first()
+        chat_type = TargetChatType.channel if dialog["is_channel"] and not dialog["is_group"] else TargetChatType.supergroup
+        if existing:
+            existing.title = str(dialog["title"])
+            existing.username = dialog["username"] if dialog["username"] else None
+            existing.type = chat_type
+        else:
+            db.add(
+                TargetChat(
+                    session_id=sender_session.id,
+                    telegram_chat_id=int(dialog["telegram_chat_id"]),
+                    title=str(dialog["title"]),
+                    username=dialog["username"] if dialog["username"] else None,
+                    type=chat_type,
+                    enabled=True,
+                )
+            )
+            imported += 1
+    db.commit()
+    return {"imported": imported, "total_dialogs": len(dialogs)}
+
+
 @app.get("/api/chats", response_model=list[TargetChatOut])
 def list_chats(
     _: int = Depends(require_admin),
@@ -61,6 +113,17 @@ def create_chat(
     _: int = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> TargetChat:
+    if payload.session_id and not db.get(TelegramSession, payload.session_id):
+        raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    existing = db.scalars(
+        select(TargetChat)
+        .where(TargetChat.session_id == payload.session_id)
+        .where(TargetChat.telegram_chat_id == payload.telegram_chat_id)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="This destination group is already added")
+
     chat = TargetChat(**payload.model_dump())
     db.add(chat)
     db.commit()
@@ -99,6 +162,12 @@ def create_post(
     admin_telegram_id: int = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> PostOut:
+    if payload.status == PostStatus.scheduled:
+        if not payload.default_session_id:
+            raise HTTPException(status_code=422, detail="Choose a Telegram account before scheduling")
+        if not payload.target_chat_ids:
+            raise HTTPException(status_code=422, detail="Choose at least one destination group")
+
     post_data = payload.model_dump(exclude={"target_chat_ids"})
     post = Post(**post_data, created_by_telegram_id=admin_telegram_id)
     db.add(post)

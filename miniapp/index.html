@@ -16,17 +16,39 @@
         </div>
         <button id="refresh" type="button">Refresh</button>
       </header>
+      <div id="notice" class="notice" hidden></div>
 
       <section class="grid">
         <article>
-          <h2>Sessions</h2>
+          <h2>Telegram accounts</h2>
+          <p class="hint">Accounts that send posts from their own Telegram session.</p>
           <div id="sessions" class="list"></div>
         </article>
 
         <article>
-          <h2>Chats</h2>
+          <h2>Destination groups</h2>
+          <p class="hint">Groups and channels where selected accounts can publish.</p>
           <div id="chats" class="list"></div>
         </article>
+      </section>
+
+      <section>
+        <h2>Add destination manually</h2>
+        <form id="chat-form" class="compact-form">
+          <label>
+            Title
+            <input name="title" required maxlength="240" placeholder="Group name" />
+          </label>
+          <label>
+            Chat ID
+            <input name="telegram_chat_id" required inputmode="numeric" placeholder="-1001234567890" />
+          </label>
+          <label>
+            Linked account
+            <select name="session_id"></select>
+          </label>
+          <button type="submit">Add group</button>
+        </form>
       </section>
 
       <section>
@@ -49,14 +71,14 @@
             <input name="interval_minutes" type="number" min="1" placeholder="empty for once" />
           </label>
           <label>
-            Session
+            Telegram account
             <select name="default_session_id"></select>
           </label>
           <fieldset>
-            <legend>Targets</legend>
+            <legend>Destination groups</legend>
             <div id="target-checkboxes" class="checks"></div>
           </fieldset>
-          <button type="submit">Save post</button>
+          <button id="save-post" type="submit">Save post</button>
         </form>
       </section>
 

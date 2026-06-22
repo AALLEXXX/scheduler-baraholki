@@ -61,3 +61,31 @@ def classify_send_error(exc: Exception, session: TelegramSession | None = None) 
             session.status = SessionStatus.limited
         return f"FloodWait: wait {exc.seconds} seconds"
     return f"{exc.__class__.__name__}: {exc}"
+
+
+async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, object]]:
+    settings = get_settings()
+    client = TelegramClient(
+        session.session_path,
+        settings.telegram_api_id,
+        settings.telegram_api_hash,
+    )
+    rows: list[dict[str, object]] = []
+    async with client:
+        if not await client.is_user_authorized():
+            raise RuntimeError("Telegram session needs login")
+
+        async for dialog in client.iter_dialogs(limit=300):
+            if not (dialog.is_group or dialog.is_channel):
+                continue
+            entity = dialog.entity
+            rows.append(
+                {
+                    "telegram_chat_id": int(dialog.id),
+                    "title": dialog.name,
+                    "username": getattr(entity, "username", None),
+                    "is_group": bool(dialog.is_group),
+                    "is_channel": bool(dialog.is_channel),
+                }
+            )
+    return rows
