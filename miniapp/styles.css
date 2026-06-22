@@ -233,6 +233,18 @@ button:disabled {
   gap: 10px;
 }
 
+.bot-open-block {
+  display: grid;
+  gap: 7px;
+}
+
+.bot-open-block p {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -421,6 +433,13 @@ textarea {
   border-radius: 8px;
   padding: 14px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.post-item.scheduled {
+  border-color: rgba(24, 160, 88, 0.34);
+  background:
+    linear-gradient(135deg, rgba(24, 160, 88, 0.13), transparent 42%),
+    color-mix(in srgb, var(--surface-strong) 92%, transparent);
 }
 
 .post-item.paused {

@@ -342,13 +342,53 @@ def test_delete_messages_from_session_matches_real_dialog_messages(
             session=session,
             peer="@scheduler_baraholki_bot",
             message_ids=[10, 11],
-            match_texts={"<b>Bold text</b>", "Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание."},
+            match_texts={"<b>Bold text</b>"},
+            ack_text="Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание.",
             created_at=created_at,
         )
     )
 
     assert deleted == 2
     assert fake_client.deleted == [("entity:@scheduler_baraholki_bot", [500, 501], True)]
+
+
+def test_delete_messages_from_session_deletes_only_nearest_ack(
+    monkeypatch,
+    db_session,
+) -> None:
+    session = make_session(db_session)
+    created_at = datetime.now(UTC)
+    ack = "Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание."
+
+    class MatchingClient(AuthorizedClient):
+        async def iter_messages(self, _entity, limit: int):
+            assert limit == 120
+            messages = [
+                SimpleNamespace(id=710, raw_text=ack, message=None, date=created_at, media=None),
+                SimpleNamespace(id=601, raw_text=ack, message=None, date=created_at, media=None),
+                SimpleNamespace(id=600, raw_text="Draft text", message=None, date=created_at, media=None),
+                SimpleNamespace(id=501, raw_text=ack, message=None, date=created_at, media=None),
+                SimpleNamespace(id=500, raw_text="Other draft", message=None, date=created_at, media=None),
+            ]
+            for message in messages:
+                yield message
+
+    fake_client = MatchingClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    deleted = asyncio.run(
+        telegram_client.delete_messages_from_session(
+            session=session,
+            peer="@scheduler_baraholki_bot",
+            message_ids=[10, 11],
+            match_texts={"Draft text"},
+            ack_text=ack,
+            created_at=created_at,
+        )
+    )
+
+    assert deleted == 2
+    assert fake_client.deleted == [("entity:@scheduler_baraholki_bot", [600, 601], True)]
 
 
 def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, db_session) -> None:

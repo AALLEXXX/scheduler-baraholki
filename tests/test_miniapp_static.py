@@ -49,11 +49,15 @@ def test_miniapp_uses_telegram_drafts_instead_of_free_text_composer() -> None:
 
     assert 'id="draft-picker"' in html
     assert 'id="open-bot"' in html
+    assert "Открыть бота и создать пост" in html
+    assert "он появится здесь как черновик" in html
     assert 'id="refresh-drafts"' in html
     assert 'textarea name="body"' not in html
     assert "selectedDraftId" in js
     assert 'api(`posts/${draftId}/schedule`' in js
     assert "Отправьте пост боту" in js
+    assert "openTelegramBot" in js
+    assert "tg://resolve" in js
 
 
 def test_miniapp_can_paginate_and_delete_posts() -> None:
@@ -114,6 +118,7 @@ def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
     assert "/resume" in js
     assert "Старая дата уже прошла" in js
     assert ".post-meta" in css
+    assert ".post-item.scheduled" in css
     assert ".modal-backdrop" in css
 
 

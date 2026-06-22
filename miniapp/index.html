@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-6" />
+    <link rel="stylesheet" href="styles.css?v=20260623-7" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -80,7 +80,10 @@
 
         <form id="post-form" class="stack">
           <div class="telegram-compose">
-            <button id="open-bot" type="button">Отправить пост боту</button>
+            <div class="bot-open-block">
+              <button id="open-bot" type="button">Открыть бота и создать пост</button>
+              <p>Отправьте боту текст, фото или альбом — он появится здесь как черновик.</p>
+            </div>
             <button id="refresh-drafts" class="secondary-button" type="button">Обновить посты</button>
           </div>
 
@@ -212,6 +215,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260623-6"></script>
+    <script src="app.js?v=20260623-7"></script>
   </body>
 </html>

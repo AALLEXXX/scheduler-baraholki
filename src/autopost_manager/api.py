@@ -154,10 +154,11 @@ async def delete_source_messages(
     refs: set[tuple[int, int]],
     db: Session,
     match_texts: set[str] | None = None,
+    ack_text: str | None = None,
     created_at=None,
     media_count: int = 0,
 ) -> BotMessageDeleteResult:
-    if not refs and not match_texts and not media_count:
+    if not refs and not match_texts and not ack_text and not media_count:
         return BotMessageDeleteResult()
 
     message_ids = sorted({message_id for _chat_id, message_id in refs})
@@ -178,6 +179,7 @@ async def delete_source_messages(
             peer=bot_peer,
             message_ids=message_ids,
             match_texts=match_texts,
+            ack_text=ack_text,
             created_at=created_at,
             media_count=media_count,
         )
@@ -697,7 +699,7 @@ async def delete_post(
         raise HTTPException(status_code=404, detail="Post not found")
 
     message_refs = collect_source_message_refs(post)
-    match_texts = {post.body, POST_SAVED_ACK_TEXT}
+    match_texts = {post.body}
     created_at = post.created_at
     media_count = len(post.media_items)
     jobs = list(db.scalars(select(PublishJob).where(PublishJob.post_id == post.id)))
@@ -710,6 +712,7 @@ async def delete_post(
         refs=message_refs,
         db=db,
         match_texts=match_texts,
+        ack_text=POST_SAVED_ACK_TEXT,
         created_at=created_at,
         media_count=media_count,
     )

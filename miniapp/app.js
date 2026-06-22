@@ -219,6 +219,37 @@ function mediaLabel(post) {
   return `${count} медиа`;
 }
 
+function botUsername() {
+  return (state.config.bot_username || "scheduler_baraholki_bot").replace(/^@/, "").trim();
+}
+
+function openTelegramBot() {
+  const username = botUsername();
+  const webUrl = `https://t.me/${encodeURIComponent(username)}`;
+  const appUrl = `tg://resolve?domain=${encodeURIComponent(username)}`;
+
+  try {
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(webUrl);
+      window.setTimeout(() => {
+        window.location.href = appUrl;
+      }, 450);
+      return;
+    }
+  } catch {
+    // Fall back below.
+  }
+
+  try {
+    window.location.href = appUrl;
+    window.setTimeout(() => {
+      window.location.href = webUrl;
+    }, 300);
+  } catch {
+    window.location.href = webUrl;
+  }
+}
+
 async function confirmSpamRiskIfNeeded(intervalMinutes) {
   if (intervalMinutes < 20) {
     notify("Минимальный интервал повтора — 20 минут.", "error");
@@ -477,7 +508,7 @@ function emptyPost(text) {
 
 function renderPost(post) {
   const node = document.createElement("article");
-  node.className = `post-item ${post.status === "paused" ? "paused" : ""}`.trim();
+  node.className = `post-item ${post.status}`.trim();
   const cleanBody = stripHtml(post.body || "");
   const preview = cleanBody.length > 120 ? `${cleanBody.slice(0, 120)}...` : cleanBody || "Медиа без текста";
   node.innerHTML = `
@@ -755,15 +786,7 @@ document.querySelector("#logout-account").addEventListener("click", async () => 
   }
 });
 
-document.querySelector("#open-bot").addEventListener("click", () => {
-  const username = state.config.bot_username || "scheduler_baraholki_bot";
-  const url = `https://t.me/${username}`;
-  if (tg?.openTelegramLink) {
-    tg.openTelegramLink(url);
-  } else {
-    window.open(url, "_blank");
-  }
-});
+document.querySelector("#open-bot").addEventListener("click", openTelegramBot);
 
 document.querySelector("#refresh-drafts").addEventListener("click", () => {
   clearNotice();

@@ -214,10 +214,11 @@ async def delete_messages_from_session(
     peer: str,
     message_ids: list[int],
     match_texts: set[str] | None = None,
+    ack_text: str | None = None,
     created_at: datetime | None = None,
     media_count: int = 0,
 ) -> int:
-    if not message_ids and not match_texts and not media_count:
+    if not message_ids and not match_texts and not ack_text and not media_count:
         return 0
 
     lock = _lock_for(session.session_path)
@@ -232,6 +233,7 @@ async def delete_messages_from_session(
                 client=client,
                 entity=entity,
                 match_texts=match_texts or set(),
+                ack_text=ack_text,
                 created_at=created_at,
                 media_count=media_count,
             )
@@ -261,11 +263,15 @@ async def find_dialog_message_ids(
     client,
     entity,
     match_texts: set[str],
+    ack_text: str | None = None,
     created_at: datetime | None,
     media_count: int,
 ) -> set[int]:
     normalized_texts = {normalize_plain_text(text) for text in match_texts if normalize_plain_text(text)}
+    normalized_ack_text = normalize_plain_text(ack_text)
     matched_ids: set[int] = set()
+    source_candidates: list[tuple[datetime | None, int]] = []
+    ack_candidates: list[tuple[datetime | None, int]] = []
     media_candidates: list[tuple[float, int]] = []
 
     async for message in client.iter_messages(entity, limit=120):
@@ -276,7 +282,11 @@ async def find_dialog_message_ids(
             getattr(message, "raw_text", None) or getattr(message, "message", None)
         )
         if raw_text and raw_text in normalized_texts:
-            matched_ids.add(int(message.id))
+            message_id = int(message.id)
+            matched_ids.add(message_id)
+            source_candidates.append((getattr(message, "date", None), message_id))
+        elif raw_text and normalized_ack_text and raw_text == normalized_ack_text:
+            ack_candidates.append((getattr(message, "date", None), int(message.id)))
 
         if media_count and getattr(message, "media", None):
             distance = 0.0
@@ -290,7 +300,51 @@ async def find_dialog_message_ids(
 
     for _distance, message_id in sorted(media_candidates)[:media_count]:
         matched_ids.add(message_id)
+
+    ack_id = closest_ack_message_id(
+        ack_candidates=ack_candidates,
+        source_candidates=source_candidates,
+        media_ids=matched_ids,
+        created_at=created_at,
+    )
+    if ack_id:
+        matched_ids.add(ack_id)
     return matched_ids
+
+
+def closest_ack_message_id(
+    *,
+    ack_candidates: list[tuple[datetime | None, int]],
+    source_candidates: list[tuple[datetime | None, int]],
+    media_ids: set[int],
+    created_at: datetime | None,
+) -> int | None:
+    if not ack_candidates:
+        return None
+
+    source_ids = [message_id for _date, message_id in source_candidates]
+    if media_ids:
+        source_ids.extend(media_ids)
+    if source_ids:
+        anchor_id = max(source_ids)
+        later_acks = [candidate for candidate in ack_candidates if candidate[1] > anchor_id]
+        if later_acks:
+            return min(later_acks, key=lambda candidate: candidate[1] - anchor_id)[1]
+
+    if created_at:
+        reference = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+
+        def distance(candidate: tuple[datetime | None, int]) -> float:
+            date, _message_id = candidate
+            if not date:
+                return float("inf")
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=UTC)
+            return abs((date - reference).total_seconds())
+
+        return min(ack_candidates, key=distance)[1]
+
+    return min(ack_candidates, key=lambda candidate: candidate[1])[1]
 
 
 def text_from_telegram_title(value) -> str:

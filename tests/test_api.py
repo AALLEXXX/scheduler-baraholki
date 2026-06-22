@@ -798,12 +798,14 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
         refs: set[tuple[int, int]],
         db,
         match_texts: set[str] | None = None,
+        ack_text: str | None = None,
         created_at=None,
         media_count: int = 0,
     ) -> api_module.BotMessageDeleteResult:
         assert telegram_user_id == 111
         assert db is not None
-        assert match_texts
+        assert match_texts == {"Post body"}
+        assert ack_text == api_module.POST_SAVED_ACK_TEXT
         assert created_at is not None
         assert media_count == 2
         calls.append(refs)
