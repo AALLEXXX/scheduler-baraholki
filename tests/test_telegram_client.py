@@ -24,6 +24,7 @@ class AuthorizedClient:
         self.disconnected = False
         self.sent: list[tuple[int, str, str | None]] = []
         self.files: list[tuple[int, object, str | None, str | None]] = []
+        self.forwarded: list[tuple[int, object, str | None, bool | None]] = []
         self.deleted: list[tuple[str, list[int], bool]] = []
         self.entity_requests: list[str] = []
 
@@ -49,6 +50,17 @@ class AuthorizedClient:
     ):
         self.files.append((chat_id, file, caption, parse_mode))
         return FakeMessage()
+
+    async def forward_messages(
+        self,
+        chat_id: int,
+        messages,
+        from_peer=None,
+        *,
+        drop_author: bool | None = None,
+    ):
+        self.forwarded.append((chat_id, messages, from_peer, drop_author))
+        return [FakeMessage()]
 
     async def delete_messages(self, peer: str, message_ids: list[int], revoke: bool = True):
         self.deleted.append((peer, message_ids, revoke))
@@ -194,7 +206,7 @@ def test_send_post_from_session_sends_media_with_caption(monkeypatch, db_session
     assert fake_client.sent == []
 
 
-def test_send_post_from_session_sends_album_with_full_text_caption(
+def test_send_post_from_session_copies_long_album_from_bot_chat(
     monkeypatch,
     db_session,
 ) -> None:
@@ -224,7 +236,10 @@ def test_send_post_from_session_sends_album_with_full_text_caption(
     )
 
     assert message_id == 999
-    assert fake_client.files == [(-1001, ["first", "second"], "x" * 1100, "html")]
+    assert fake_client.forwarded == [
+        (-1001, [1, 2], "@scheduler_baraholki_bot", True),
+    ]
+    assert fake_client.files == []
     assert fake_client.sent == []
 
 

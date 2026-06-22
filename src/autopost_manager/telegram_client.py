@@ -88,6 +88,7 @@ async def send_post_from_session(
         media_items=media_items,
         text=post.body,
         parse_mode=post.parse_mode,
+        source_message_ids=source_message_ids_for_post(post, media_items),
     )
 
 
@@ -98,6 +99,7 @@ async def send_media_from_session(
     media_items: list[PostMedia],
     text: str,
     parse_mode: str | None,
+    source_message_ids: list[int] | None = None,
 ) -> int:
     lock = _lock_for(session.session_path)
 
@@ -118,27 +120,36 @@ async def send_media_from_session(
                 db.commit()
                 raise RuntimeError("Telegram session needs login")
 
-            files = [media.file_id for media in media_items]
-            try:
-                sent = await send_files_with_optional_text(
-                    client=client,
-                    chat_id=chat_id,
-                    files=files,
-                    text=text,
-                    parse_mode=parse_mode,
+            if len(text) > 1024 and source_message_ids:
+                bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
+                sent = await client.forward_messages(
+                    chat_id,
+                    source_message_ids[0] if len(source_message_ids) == 1 else source_message_ids,
+                    from_peer=bot_peer,
+                    drop_author=True,
                 )
-            except Exception:
-                temp_files = [
-                    await download_bot_file(media.file_id, media.media_type)
-                    for media in media_items
-                ]
-                sent = await send_files_with_optional_text(
-                    client=client,
-                    chat_id=chat_id,
-                    files=temp_files,
-                    text=text,
-                    parse_mode=parse_mode,
-                )
+            else:
+                files = [media.file_id for media in media_items]
+                try:
+                    sent = await send_files_with_optional_text(
+                        client=client,
+                        chat_id=chat_id,
+                        files=files,
+                        text=text,
+                        parse_mode=parse_mode,
+                    )
+                except Exception:
+                    temp_files = [
+                        await download_bot_file(media.file_id, media.media_type)
+                        for media in media_items
+                    ]
+                    sent = await send_files_with_optional_text(
+                        client=client,
+                        chat_id=chat_id,
+                        files=temp_files,
+                        text=text,
+                        parse_mode=parse_mode,
+                    )
         finally:
             for temp_file in temp_files:
                 Path(temp_file).unlink(missing_ok=True)
@@ -148,6 +159,19 @@ async def send_media_from_session(
         session.status = SessionStatus.active
         db.commit()
         return extract_sent_message_id(sent)
+
+
+def source_message_ids_for_post(post: Post, media_items: list[PostMedia]) -> list[int]:
+    ids = [
+        media.source_bot_message_id
+        for media in sorted(media_items, key=lambda item: item.order_index)
+        if media.source_bot_message_id
+    ]
+    if ids:
+        return ids
+    if post.source_bot_message_id:
+        return [post.source_bot_message_id]
+    return []
 
 
 async def send_files_with_optional_text(
