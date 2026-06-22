@@ -12,6 +12,10 @@ const state = {
   chats: [],
   posts: [],
   pendingSessionId: null,
+  selectedChatIds: new Set(),
+  groupSearch: "",
+  groupPage: 1,
+  groupPageSize: 10,
 };
 
 function activeSessions() {
@@ -52,7 +56,13 @@ async function api(path, options = {}) {
     const text = await response.text();
     try {
       const parsed = JSON.parse(text);
-      message = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+      if (typeof parsed.detail === "string") {
+        message = parsed.detail;
+      } else if (Array.isArray(parsed.detail)) {
+        message = parsed.detail.map((item) => item.msg || "Проверьте заполнение формы").join("\n");
+      } else {
+        message = "Не получилось выполнить действие. Проверьте данные и попробуйте еще раз.";
+      }
     } catch {
       message = text || message;
     }
@@ -64,6 +74,52 @@ async function api(path, options = {}) {
 function setBusy(button, busy, text) {
   button.disabled = busy;
   if (text) button.textContent = text;
+}
+
+function selectedGroups() {
+  return [...state.selectedChatIds];
+}
+
+function filteredChats() {
+  const query = state.groupSearch.trim().toLowerCase();
+  if (!query) return state.chats;
+  return state.chats.filter((chat) => chat.title.toLowerCase().includes(query));
+}
+
+function clampGroupPage() {
+  const pages = Math.max(1, Math.ceil(filteredChats().length / state.groupPageSize));
+  state.groupPage = Math.min(Math.max(1, state.groupPage), pages);
+  return pages;
+}
+
+async function confirmSpamRiskIfNeeded(intervalMinutes) {
+  if (intervalMinutes < 20) {
+    notify("Минимальный интервал повтора — 20 минут.", "error");
+    return false;
+  }
+
+  if (intervalMinutes > 30) return true;
+
+  const message =
+    "За частую отправку сообщений ваш аккаунт в Telegram может быть ограничен или заблокирован.";
+
+  if (tg?.showPopup) {
+    return new Promise((resolve) => {
+      tg.showPopup(
+        {
+          title: "Риск блокировки",
+          message,
+          buttons: [
+            { id: "understand", type: "default", text: "Я понимаю" },
+            { id: "cancel", type: "cancel", text: "Отмена" },
+          ],
+        },
+        (buttonId) => resolve(buttonId === "understand"),
+      );
+    });
+  }
+
+  return window.confirm(`${message}\n\nПродолжить?`);
 }
 
 function render() {
@@ -90,30 +146,11 @@ function render() {
       : "Нажмите «Обновить группы», чтобы подтянуть группы аккаунта."
     : "Сначала подключите аккаунт.";
 
-  const accountSelect = document.querySelector("select[name=default_session_id]");
-  const accountRow = document.querySelector("#account-row");
-  accountSelect.replaceChildren();
-  connected.forEach((session) => {
-    accountSelect.append(new Option(session.phone || session.name, session.id));
-  });
-  accountRow.hidden = connected.length < 2;
-  if (connected.length === 1) {
-    accountSelect.value = connected[0].id;
-  }
-
   const picker = document.querySelector("#group-picker");
   if (!hasGroups) {
     picker.replaceChildren(emptyChip(hasAccount ? "Группы пока не загружены" : "Нет подключенного аккаунта"));
   } else {
-    picker.replaceChildren(
-      ...state.chats.map((chat) => {
-        const label = document.createElement("label");
-        label.className = "group-chip";
-        label.innerHTML = `<input type="checkbox" name="target_chat_ids" value="${chat.id}" /> <span></span>`;
-        label.querySelector("span").textContent = chat.title;
-        return label;
-      }),
-    );
+    renderGroupPicker();
   }
 
   const saveButton = document.querySelector("#save-post");
@@ -125,6 +162,43 @@ function render() {
   } else {
     posts.replaceChildren(...state.posts.map(renderPost));
   }
+}
+
+function renderGroupPicker() {
+  const picker = document.querySelector("#group-picker");
+  const pagination = document.querySelector("#group-pagination");
+  const chats = filteredChats();
+  const pages = clampGroupPage();
+  const start = (state.groupPage - 1) * state.groupPageSize;
+  const visible = chats.slice(start, start + state.groupPageSize);
+
+  if (visible.length === 0) {
+    picker.replaceChildren(emptyChip("Ничего не найдено"));
+  } else {
+    picker.replaceChildren(
+      ...visible.map((chat) => {
+        const label = document.createElement("label");
+        label.className = "group-chip";
+        label.innerHTML = `<input type="checkbox" name="target_chat_ids" value="${chat.id}" /> <span></span>`;
+        const input = label.querySelector("input");
+        input.checked = state.selectedChatIds.has(chat.id);
+        input.addEventListener("change", () => {
+          if (input.checked) {
+            state.selectedChatIds.add(chat.id);
+          } else {
+            state.selectedChatIds.delete(chat.id);
+          }
+        });
+        label.querySelector("span").textContent = chat.title;
+        return label;
+      }),
+    );
+  }
+
+  pagination.hidden = chats.length <= state.groupPageSize;
+  document.querySelector("#groups-page").textContent = `${state.groupPage} / ${pages}`;
+  document.querySelector("#groups-prev").disabled = state.groupPage <= 1;
+  document.querySelector("#groups-next").disabled = state.groupPage >= pages;
 }
 
 function emptyChip(text) {
@@ -161,6 +235,8 @@ async function load() {
   state.sessions = sessions;
   state.chats = chats;
   state.posts = posts;
+  const availableIds = new Set(chats.map((chat) => chat.id));
+  state.selectedChatIds = new Set([...state.selectedChatIds].filter((id) => availableIds.has(id)));
   render();
 }
 
@@ -193,6 +269,22 @@ document.querySelector("#sync-groups").addEventListener("click", syncGroups);
 
 document.querySelector("select[name=schedule_kind]").addEventListener("change", (event) => {
   document.querySelector("#interval-row").hidden = event.target.value !== "interval";
+});
+
+document.querySelector("#group-search").addEventListener("input", (event) => {
+  state.groupSearch = event.target.value;
+  state.groupPage = 1;
+  renderGroupPicker();
+});
+
+document.querySelector("#groups-prev").addEventListener("click", () => {
+  state.groupPage -= 1;
+  renderGroupPicker();
+});
+
+document.querySelector("#groups-next").addEventListener("click", () => {
+  state.groupPage += 1;
+  renderGroupPicker();
 });
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {
@@ -283,12 +375,11 @@ document.querySelector("#password-form").addEventListener("submit", async (event
 document.querySelector("#post-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   clearNotice();
-  const form = new FormData(event.currentTarget);
-  const checkedGroups = [...document.querySelectorAll("input[name=target_chat_ids]:checked")].map(
-    (input) => input.value,
-  );
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const checkedGroups = selectedGroups();
   const connected = activeSessions();
-  const sessionId = form.get("default_session_id") || connected[0]?.id;
+  const sessionId = connected[0]?.id;
   const scheduleKind = form.get("schedule_kind");
   const nextRun = form.get("next_run_at");
 
@@ -302,7 +393,19 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   }
 
   const body = String(form.get("body") || "").trim();
+  if (!body) {
+    notify("Напишите текст поста.", "error");
+    return;
+  }
+
   const title = body.slice(0, 60) || "Пост";
+  const intervalMinutes = scheduleKind === "interval" ? Number(form.get("interval_minutes")) : null;
+
+  if (scheduleKind === "interval") {
+    const confirmed = await confirmSpamRiskIfNeeded(intervalMinutes);
+    if (!confirmed) return;
+  }
+
   const button = document.querySelector("#save-post");
   setBusy(button, true, "Сохраняем...");
 
@@ -315,13 +418,18 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
         status: "scheduled",
         schedule_kind: scheduleKind,
         next_run_at: new Date(nextRun).toISOString(),
-        interval_minutes: scheduleKind === "interval" ? Number(form.get("interval_minutes")) : null,
+        interval_minutes: intervalMinutes,
+        spam_risk_acknowledged: scheduleKind === "interval" && intervalMinutes <= 30,
         default_session_id: sessionId,
         target_chat_ids: checkedGroups,
       }),
     });
 
-    event.currentTarget.reset();
+    formElement.reset();
+    state.selectedChatIds.clear();
+    state.groupSearch = "";
+    state.groupPage = 1;
+    document.querySelector("#group-search").value = "";
     document.querySelector("#interval-row").hidden = true;
     notify("Пост запланирован.");
     await load();

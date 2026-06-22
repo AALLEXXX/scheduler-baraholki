@@ -68,7 +68,8 @@ class PostCreate(BaseModel):
     timezone: str = "Asia/Tbilisi"
     session_strategy: str = "fixed"
     default_session_id: uuid.UUID | None = None
-    target_chat_ids: list[uuid.UUID] = []
+    target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
+    spam_risk_acknowledged: bool = False
 
 
 class ChatSyncResult(BaseModel):

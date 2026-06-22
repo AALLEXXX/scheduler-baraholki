@@ -300,11 +300,22 @@ def create_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
+    if payload.schedule_kind == ScheduleKind.interval:
+        if payload.interval_minutes is None:
+            raise HTTPException(status_code=422, detail="Укажите интервал повтора")
+        if payload.interval_minutes < 20:
+            raise HTTPException(status_code=422, detail="Минимальный интервал повтора — 20 минут")
+        if payload.interval_minutes <= 30 and not payload.spam_risk_acknowledged:
+            raise HTTPException(
+                status_code=422,
+                detail="Подтвердите риск: за частую отправку сообщений Telegram может ограничить аккаунт",
+            )
+
     if payload.status == PostStatus.scheduled:
         if not payload.default_session_id:
-            raise HTTPException(status_code=422, detail="Choose a Telegram account before scheduling")
+            raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
         if not payload.target_chat_ids:
-            raise HTTPException(status_code=422, detail="Choose at least one group")
+            raise HTTPException(status_code=422, detail="Выберите хотя бы одну группу")
 
     if payload.default_session_id:
         session = db.get(TelegramSession, payload.default_session_id)
@@ -316,7 +327,7 @@ def create_post(
         if not target or target.owner_telegram_id != telegram_user_id:
             raise HTTPException(status_code=404, detail="Group not found")
 
-    post_data = payload.model_dump(exclude={"target_chat_ids"})
+    post_data = payload.model_dump(exclude={"target_chat_ids", "spam_risk_acknowledged"})
     post = Post(**post_data, created_by_telegram_id=telegram_user_id)
     db.add(post)
     db.flush()
