@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-5" />
+    <link rel="stylesheet" href="styles.css?v=20260623-6" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -153,7 +153,65 @@
           <button id="posts-next" type="button">Дальше</button>
         </div>
       </section>
+
+      <div id="edit-modal" class="modal-backdrop" hidden>
+        <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Редактирование</p>
+              <h2 id="edit-title">Запланированный пост</h2>
+            </div>
+            <button id="edit-close" class="secondary-button compact-button" type="button">Закрыть</button>
+          </div>
+
+          <form id="edit-form" class="stack">
+            <p id="edit-preview" class="edit-preview"></p>
+
+            <div class="form-grid">
+              <label>
+                Когда
+                <input name="next_run_at" type="datetime-local" required />
+              </label>
+              <label>
+                Повтор
+                <select name="schedule_kind">
+                  <option value="once">Один раз</option>
+                  <option value="interval">Каждые N минут</option>
+                </select>
+              </label>
+            </div>
+
+            <label id="edit-interval-row" hidden>
+              Интервал, минут
+              <input name="interval_minutes" type="number" min="20" value="60" />
+            </label>
+
+            <div>
+              <div class="section-row">
+                <span>Куда отправлять</span>
+                <small id="edit-groups-count">0 групп</small>
+              </div>
+              <input
+                id="edit-group-search"
+                class="search-input"
+                type="search"
+                placeholder="Найти группу"
+                autocomplete="off"
+              />
+              <div id="edit-folder-picker" class="folder-list"></div>
+              <div id="edit-group-picker" class="chip-grid"></div>
+              <div id="edit-group-pagination" class="pagination" hidden>
+                <button id="edit-groups-prev" type="button">Назад</button>
+                <span id="edit-groups-page">1 / 1</span>
+                <button id="edit-groups-next" type="button">Дальше</button>
+              </div>
+            </div>
+
+            <button id="edit-save" type="submit">Сохранить изменения</button>
+          </form>
+        </section>
+      </div>
     </main>
-    <script src="app.js?v=20260623-5"></script>
+    <script src="app.js?v=20260623-6"></script>
   </body>
 </html>

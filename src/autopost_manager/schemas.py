@@ -92,6 +92,10 @@ class PostScheduleUpdate(BaseModel):
     spam_risk_acknowledged: bool = False
 
 
+class PostResumeUpdate(BaseModel):
+    next_run_at: datetime | None = None
+
+
 class ChatSyncResult(BaseModel):
     imported: int
     total_dialogs: int

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from autopost_manager.config import get_settings
 from autopost_manager.db import create_schema, get_db
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import (
+    JobStatus,
     Post,
     PostStatus,
     PostTarget,
@@ -38,6 +40,7 @@ from autopost_manager.schemas import (
     PostCreate,
     PostMediaOut,
     PostOut,
+    PostResumeUpdate,
     PostScheduleUpdate,
     TargetChatCreate,
     TargetChatOut,
@@ -104,6 +107,25 @@ def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
     for media in post.media_items:
         refs.add((media.source_bot_chat_id, media.source_bot_message_id))
     return refs
+
+
+def as_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def cancel_pending_jobs(post: Post, db: Session) -> int:
+    jobs = list(
+        db.scalars(
+            select(PublishJob)
+            .where(PublishJob.post_id == post.id)
+            .where(PublishJob.status == JobStatus.pending)
+        )
+    )
+    for job in jobs:
+        job.status = JobStatus.cancelled
+    return len(jobs)
 
 
 async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteResult:
@@ -175,11 +197,17 @@ async def delete_source_messages(
 def validate_post_schedule(
     *,
     schedule_kind: ScheduleKind,
+    next_run_at: datetime | None,
     interval_minutes: int | None,
     spam_risk_acknowledged: bool,
     default_session_id: uuid.UUID | None,
     target_chat_ids: list[uuid.UUID],
 ) -> None:
+    if next_run_at is None:
+        raise HTTPException(status_code=422, detail="Выберите дату отправки")
+    if as_aware(next_run_at) <= datetime.now(UTC):
+        raise HTTPException(status_code=422, detail="Выберите будущую дату отправки")
+
     if schedule_kind == ScheduleKind.interval:
         if interval_minutes is None:
             raise HTTPException(status_code=422, detail="Укажите интервал повтора")
@@ -548,6 +576,7 @@ def create_post(
     if payload.status == PostStatus.scheduled:
         validate_post_schedule(
             schedule_kind=payload.schedule_kind,
+            next_run_at=payload.next_run_at,
             interval_minutes=payload.interval_minutes,
             spam_risk_acknowledged=payload.spam_risk_acknowledged,
             default_session_id=payload.default_session_id,
@@ -585,6 +614,7 @@ def schedule_post(
 
     validate_post_schedule(
         schedule_kind=payload.schedule_kind,
+        next_run_at=payload.next_run_at,
         interval_minutes=payload.interval_minutes,
         spam_risk_acknowledged=payload.spam_risk_acknowledged,
         default_session_id=payload.default_session_id,
@@ -603,10 +633,54 @@ def schedule_post(
     post.interval_minutes = payload.interval_minutes
     post.timezone = payload.timezone
     post.default_session_id = payload.default_session_id
+    cancel_pending_jobs(post, db)
     post.targets.clear()
     db.flush()
     for target_chat_id in payload.target_chat_ids:
         db.add(PostTarget(post_id=post.id, target_chat_id=target_chat_id))
+    db.commit()
+    db.refresh(post)
+    return post_to_out(post)
+
+
+@app.patch("/api/posts/{post_id}/pause", response_model=PostOut)
+def pause_post(
+    post_id: uuid.UUID,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> PostOut:
+    post = db.get(Post, post_id)
+    if not post or post.created_by_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.status not in {PostStatus.scheduled, PostStatus.paused}:
+        raise HTTPException(status_code=409, detail="Можно поставить на паузу только пост из очереди")
+
+    post.status = PostStatus.paused
+    cancel_pending_jobs(post, db)
+    db.commit()
+    db.refresh(post)
+    return post_to_out(post)
+
+
+@app.patch("/api/posts/{post_id}/resume", response_model=PostOut)
+def resume_post(
+    post_id: uuid.UUID,
+    payload: PostResumeUpdate,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> PostOut:
+    post = db.get(Post, post_id)
+    if not post or post.created_by_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.status != PostStatus.paused:
+        raise HTTPException(status_code=409, detail="Пост не на паузе")
+
+    next_run_at = payload.next_run_at or post.next_run_at
+    if next_run_at is None or as_aware(next_run_at) <= datetime.now(UTC):
+        raise HTTPException(status_code=422, detail="Выберите новую будущую дату отправки")
+
+    post.next_run_at = next_run_at
+    post.status = PostStatus.scheduled
     db.commit()
     db.refresh(post)
     return post_to_out(post)

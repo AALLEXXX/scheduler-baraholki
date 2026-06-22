@@ -84,6 +84,39 @@ def test_miniapp_can_paginate_and_delete_posts() -> None:
     assert ".danger-button" in css
 
 
+def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
+    html = read("index.html")
+    js = read("app.js")
+    css = read("styles.css")
+
+    for element_id in [
+        "edit-modal",
+        "edit-form",
+        "edit-group-search",
+        "edit-folder-picker",
+        "edit-group-picker",
+        "edit-save",
+    ]:
+        assert f'id="{element_id}"' in html
+        assert f"#{element_id}" in js
+
+    assert "Расписание" in js
+    assert "Куда" in js
+    assert "Запланирован" in js
+    assert "На паузе" in js
+    assert "Редактировать" in js
+    assert "Пауза" in js
+    assert "Продолжить" in js
+    assert "togglePausePost" in js
+    assert "openEditPost" in js
+    assert 'method: "PATCH"' in js
+    assert "/pause" in js
+    assert "/resume" in js
+    assert "Старая дата уже прошла" in js
+    assert ".post-meta" in css
+    assert ".modal-backdrop" in css
+
+
 def test_miniapp_auto_syncs_groups_and_can_logout_account() -> None:
     html = read("index.html")
     js = read("app.js")

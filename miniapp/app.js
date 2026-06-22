@@ -24,6 +24,12 @@ const state = {
   groupSearch: "",
   groupPage: 1,
   groupPageSize: 10,
+  editingPostId: null,
+  editSelectedChatIds: new Set(),
+  editSelectedFolderId: "all",
+  editGroupSearch: "",
+  editGroupPage: 1,
+  editGroupPageSize: 8,
   groupsSyncedOnInit: false,
 };
 
@@ -36,7 +42,7 @@ function draftPosts() {
 }
 
 function queuePosts() {
-  return state.posts.filter((post) => post.status !== "draft");
+  return state.posts.filter((post) => post.status !== "draft" && post.status !== "archived");
 }
 
 function notify(message, type = "info") {
@@ -97,17 +103,28 @@ function selectedGroups() {
   return [...state.selectedChatIds];
 }
 
-function filteredChats() {
+function selectedEditGroups() {
+  return [...state.editSelectedChatIds];
+}
+
+function folderItems() {
+  return [
+    { id: "all", title: "Все", telegram_chat_ids: state.chats.map((chat) => chat.telegram_chat_id) },
+    ...state.folders,
+  ];
+}
+
+function filteredChats({ folderId = state.selectedFolderId, query = state.groupSearch } = {}) {
   let chats = state.chats;
-  if (state.selectedFolderId !== "all") {
-    const folder = state.folders.find((item) => String(item.id) === state.selectedFolderId);
+  if (folderId !== "all") {
+    const folder = state.folders.find((item) => String(item.id) === folderId);
     const folderChatIds = new Set((folder?.telegram_chat_ids || []).map((id) => Number(id)));
     chats = chats.filter((chat) => folderChatIds.has(Number(chat.telegram_chat_id)));
   }
 
-  const query = state.groupSearch.trim().toLowerCase();
-  if (!query) return chats;
-  return chats.filter((chat) => chat.title.toLowerCase().includes(query));
+  const cleanQuery = query.trim().toLowerCase();
+  if (!cleanQuery) return chats;
+  return chats.filter((chat) => chat.title.toLowerCase().includes(cleanQuery));
 }
 
 function pageCount(total, pageSize) {
@@ -128,6 +145,78 @@ function clampGroupPage() {
   const pages = pageCount(filteredChats().length, state.groupPageSize);
   state.groupPage = clampPage(state.groupPage, filteredChats().length, state.groupPageSize);
   return pages;
+}
+
+function clampEditGroupPage() {
+  const total = filteredChats({
+    folderId: state.editSelectedFolderId,
+    query: state.editGroupSearch,
+  }).length;
+  const pages = pageCount(total, state.editGroupPageSize);
+  state.editGroupPage = clampPage(state.editGroupPage, total, state.editGroupPageSize);
+  return pages;
+}
+
+function dateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function nextDefaultDateTimeLocal() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  date.setSeconds(0, 0);
+  return dateTimeLocalValue(date.toISOString());
+}
+
+function isPastOrNow(value) {
+  if (!value) return true;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) || time <= Date.now();
+}
+
+function chatTitleById(chatId) {
+  return state.chats.find((chat) => chat.id === chatId)?.title || "Группа не найдена";
+}
+
+function statusLabel(status) {
+  if (status === "scheduled") return "Запланирован";
+  if (status === "paused") return "На паузе";
+  if (status === "archived") return "Завершён";
+  if (status === "draft") return "Черновик";
+  return status;
+}
+
+function scheduleLabel(post) {
+  const when = post.next_run_at
+    ? new Date(post.next_run_at).toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "дата не выбрана";
+  if (post.schedule_kind === "interval") {
+    return `${when}, затем каждые ${post.interval_minutes} мин.`;
+  }
+  return `${when}, один раз`;
+}
+
+function targetSummary(post) {
+  const titles = (post.target_chat_ids || []).map(chatTitleById);
+  if (titles.length === 0) return "Группы не выбраны";
+  if (titles.length <= 2) return titles.join(", ");
+  return `${titles.slice(0, 2).join(", ")} и ещё ${titles.length - 2}`;
+}
+
+function mediaLabel(post) {
+  const count = post.media?.length || 0;
+  if (!count) return "без медиа";
+  if (count === 1) return "1 медиа";
+  return `${count} медиа`;
 }
 
 async function confirmSpamRiskIfNeeded(intervalMinutes) {
@@ -240,7 +329,7 @@ function render() {
 
 function renderFolderPicker() {
   const picker = document.querySelector("#folder-picker");
-  const items = [{ id: "all", title: "Все", telegram_chat_ids: state.chats.map((chat) => chat.telegram_chat_id) }, ...state.folders];
+  const items = folderItems();
   if (!items.some((folder) => String(folder.id) === state.selectedFolderId)) {
     state.selectedFolderId = "all";
   }
@@ -388,24 +477,138 @@ function emptyPost(text) {
 
 function renderPost(post) {
   const node = document.createElement("article");
-  node.className = "post-item";
+  node.className = `post-item ${post.status === "paused" ? "paused" : ""}`.trim();
   const cleanBody = stripHtml(post.body || "");
   const preview = cleanBody.length > 120 ? `${cleanBody.slice(0, 120)}...` : cleanBody || "Медиа без текста";
-  const when = post.next_run_at ? new Date(post.next_run_at).toLocaleString() : "без даты";
-  const media = post.media?.length ? ` · ${post.media.length} медиа` : "";
   node.innerHTML = `
     <div class="post-item-main">
-      <p></p>
-      <span></span>
+      <div class="post-title-row">
+        <p></p>
+        <strong></strong>
+      </div>
+      <dl class="post-meta">
+        <div><dt>Расписание</dt><dd data-field="schedule"></dd></div>
+        <div><dt>Куда</dt><dd data-field="targets"></dd></div>
+        <div><dt>Медиа</dt><dd data-field="media"></dd></div>
+      </dl>
     </div>
-    <button class="danger-button compact-button" type="button">Удалить</button>
+    <div class="post-actions">
+      <button class="secondary-button compact-button" data-action="edit" type="button">Редактировать</button>
+      <button class="secondary-button compact-button" data-action="pause" type="button"></button>
+      <button class="danger-button compact-button" data-action="delete" type="button">Удалить</button>
+    </div>
   `;
   node.querySelector("p").textContent = preview;
-  node.querySelector("span").textContent = `${post.status} · ${when}${media}`;
-  node.querySelector("button").addEventListener("click", () => {
+  node.querySelector("strong").textContent = statusLabel(post.status);
+  node.querySelector('[data-field="schedule"]').textContent = scheduleLabel(post);
+  node.querySelector('[data-field="targets"]').textContent = targetSummary(post);
+  node.querySelector('[data-field="media"]').textContent = mediaLabel(post);
+  node.querySelector('[data-action="pause"]').textContent =
+    post.status === "paused" ? "Продолжить" : "Пауза";
+  node.querySelector('[data-action="edit"]').addEventListener("click", () => openEditPost(post));
+  node.querySelector('[data-action="pause"]').addEventListener("click", () => {
+    togglePausePost(post).catch((error) => notify(error.message, "error"));
+  });
+  node.querySelector('[data-action="delete"]').addEventListener("click", () => {
     deletePost(post.id).catch((error) => notify(error.message, "error"));
   });
   return node;
+}
+
+function renderEditFolderPicker() {
+  const picker = document.querySelector("#edit-folder-picker");
+  const items = folderItems();
+  if (!items.some((folder) => String(folder.id) === state.editSelectedFolderId)) {
+    state.editSelectedFolderId = "all";
+  }
+
+  picker.replaceChildren(
+    ...items.map((folder) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `folder-chip ${String(folder.id) === state.editSelectedFolderId ? "selected" : ""}`.trim();
+      button.textContent = folder.title;
+      button.addEventListener("click", () => {
+        state.editSelectedFolderId = String(folder.id);
+        state.editGroupPage = 1;
+        renderEditGroupPicker();
+      });
+      return button;
+    }),
+  );
+}
+
+function renderEditGroupPicker() {
+  const picker = document.querySelector("#edit-group-picker");
+  const pagination = document.querySelector("#edit-group-pagination");
+  const chats = filteredChats({
+    folderId: state.editSelectedFolderId,
+    query: state.editGroupSearch,
+  });
+  const pages = clampEditGroupPage();
+  const start = (state.editGroupPage - 1) * state.editGroupPageSize;
+  const visible = chats.slice(start, start + state.editGroupPageSize);
+
+  document.querySelector("#edit-groups-count").textContent = `${chats.length} групп`;
+
+  if (visible.length === 0) {
+    picker.replaceChildren(emptyChip("Ничего не найдено"));
+  } else {
+    picker.replaceChildren(
+      ...visible.map((chat) => {
+        const label = document.createElement("label");
+        label.className = "group-chip";
+        label.innerHTML = `<input type="checkbox" value="${chat.id}" /> <span></span>`;
+        const input = label.querySelector("input");
+        input.checked = state.editSelectedChatIds.has(chat.id);
+        input.addEventListener("change", () => {
+          if (input.checked) {
+            state.editSelectedChatIds.add(chat.id);
+          } else {
+            state.editSelectedChatIds.delete(chat.id);
+          }
+        });
+        label.querySelector("span").textContent = chat.title;
+        return label;
+      }),
+    );
+  }
+
+  pagination.hidden = chats.length <= state.editGroupPageSize;
+  document.querySelector("#edit-groups-page").textContent = `${state.editGroupPage} / ${pages}`;
+  document.querySelector("#edit-groups-prev").disabled = state.editGroupPage <= 1;
+  document.querySelector("#edit-groups-next").disabled = state.editGroupPage >= pages;
+}
+
+function openEditPost(post, options = {}) {
+  state.editingPostId = post.id;
+  state.editSelectedChatIds = new Set(post.target_chat_ids || []);
+  state.editSelectedFolderId = "all";
+  state.editGroupSearch = "";
+  state.editGroupPage = 1;
+
+  const form = document.querySelector("#edit-form");
+  const preview = stripHtml(post.body || "") || "Медиа без текста";
+  form.elements.next_run_at.value = options.requireFutureDate
+    ? nextDefaultDateTimeLocal()
+    : dateTimeLocalValue(post.next_run_at);
+  form.elements.schedule_kind.value = post.schedule_kind || "once";
+  form.elements.interval_minutes.value = post.interval_minutes || 60;
+  document.querySelector("#edit-preview").textContent = preview.length > 180 ? `${preview.slice(0, 180)}...` : preview;
+  document.querySelector("#edit-group-search").value = "";
+  document.querySelector("#edit-interval-row").hidden = form.elements.schedule_kind.value !== "interval";
+  document.querySelector("#edit-modal").hidden = false;
+  renderEditFolderPicker();
+  renderEditGroupPicker();
+
+  if (options.requireFutureDate) {
+    notify("Старая дата уже прошла. Выберите новую дату отправки и сохраните изменения.", "error");
+  }
+}
+
+function closeEditPost() {
+  state.editingPostId = null;
+  document.querySelector("#edit-modal").hidden = true;
 }
 
 function stripHtml(value) {
@@ -446,6 +649,9 @@ async function load(options = {}) {
   state.posts = posts;
   if (!state.folders.some((folder) => String(folder.id) === state.selectedFolderId)) {
     state.selectedFolderId = "all";
+  }
+  if (!state.folders.some((folder) => String(folder.id) === state.editSelectedFolderId)) {
+    state.editSelectedFolderId = "all";
   }
   const availableIds = new Set(chats.map((chat) => chat.id));
   state.selectedChatIds = new Set([...state.selectedChatIds].filter((id) => availableIds.has(id)));
@@ -496,6 +702,31 @@ async function deletePost(postId) {
   await load();
 }
 
+async function togglePausePost(post) {
+  clearNotice();
+
+  if (post.status === "paused") {
+    if (isPastOrNow(post.next_run_at)) {
+      openEditPost(post, { requireFutureDate: true });
+      return;
+    }
+
+    const updated = await api(`posts/${post.id}/resume`, {
+      method: "PATCH",
+      body: JSON.stringify({}),
+    });
+    state.posts = state.posts.map((item) => (item.id === updated.id ? updated : item));
+    notify("Рассылка возобновлена.");
+    render();
+    return;
+  }
+
+  const updated = await api(`posts/${post.id}/pause`, { method: "PATCH" });
+  state.posts = state.posts.map((item) => (item.id === updated.id ? updated : item));
+  notify("Рассылка поставлена на паузу.");
+  render();
+}
+
 document.querySelector("#refresh").addEventListener("click", () => {
   clearNotice();
   load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));
@@ -539,8 +770,12 @@ document.querySelector("#refresh-drafts").addEventListener("click", () => {
   load().catch((error) => notify(error.message, "error"));
 });
 
-document.querySelector("select[name=schedule_kind]").addEventListener("change", (event) => {
+document.querySelector("#post-form select[name=schedule_kind]").addEventListener("change", (event) => {
   document.querySelector("#interval-row").hidden = event.target.value !== "interval";
+});
+
+document.querySelector("#edit-form select[name=schedule_kind]").addEventListener("change", (event) => {
+  document.querySelector("#edit-interval-row").hidden = event.target.value !== "interval";
 });
 
 document.querySelector("#group-search").addEventListener("input", (event) => {
@@ -557,6 +792,30 @@ document.querySelector("#groups-prev").addEventListener("click", () => {
 document.querySelector("#groups-next").addEventListener("click", () => {
   state.groupPage += 1;
   renderGroupPicker();
+});
+
+document.querySelector("#edit-group-search").addEventListener("input", (event) => {
+  state.editGroupSearch = event.target.value;
+  state.editGroupPage = 1;
+  renderEditGroupPicker();
+});
+
+document.querySelector("#edit-groups-prev").addEventListener("click", () => {
+  state.editGroupPage -= 1;
+  renderEditGroupPicker();
+});
+
+document.querySelector("#edit-groups-next").addEventListener("click", () => {
+  state.editGroupPage += 1;
+  renderEditGroupPicker();
+});
+
+document.querySelector("#edit-close").addEventListener("click", closeEditPost);
+
+document.querySelector("#edit-modal").addEventListener("click", (event) => {
+  if (event.target.id === "edit-modal") {
+    closeEditPost();
+  }
 });
 
 document.querySelector("#drafts-prev").addEventListener("click", () => {
@@ -666,6 +925,66 @@ document.querySelector("#password-form").addEventListener("submit", async (event
   }
 });
 
+document.querySelector("#edit-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearNotice();
+  const form = new FormData(event.currentTarget);
+  const postId = state.editingPostId;
+  const post = state.posts.find((item) => item.id === postId);
+  const connected = activeSessions();
+  const sessionId = post?.default_session_id || connected[0]?.id;
+  const checkedGroups = selectedEditGroups();
+  const scheduleKind = form.get("schedule_kind");
+  const nextRun = form.get("next_run_at");
+  const intervalMinutes = scheduleKind === "interval" ? Number(form.get("interval_minutes")) : null;
+
+  if (!post || !postId) {
+    notify("Пост не найден. Обновите страницу.", "error");
+    return;
+  }
+  if (!sessionId) {
+    notify("Подключите аккаунт.", "error");
+    return;
+  }
+  if (checkedGroups.length === 0) {
+    notify("Выберите хотя бы одну группу.", "error");
+    return;
+  }
+  if (isPastOrNow(new Date(nextRun).toISOString())) {
+    notify("Выберите будущую дату отправки.", "error");
+    return;
+  }
+  if (scheduleKind === "interval") {
+    const confirmed = await confirmSpamRiskIfNeeded(intervalMinutes);
+    if (!confirmed) return;
+  }
+
+  const button = document.querySelector("#edit-save");
+  setBusy(button, true, "Сохраняем...");
+
+  try {
+    const updated = await api(`posts/${postId}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({
+        schedule_kind: scheduleKind,
+        next_run_at: new Date(nextRun).toISOString(),
+        interval_minutes: intervalMinutes,
+        spam_risk_acknowledged: scheduleKind === "interval" && intervalMinutes <= 30,
+        default_session_id: sessionId,
+        target_chat_ids: checkedGroups,
+      }),
+    });
+    state.posts = state.posts.map((item) => (item.id === updated.id ? updated : item));
+    closeEditPost();
+    notify("Пост обновлён.");
+    await load();
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    setBusy(button, false, "Сохранить изменения");
+  }
+});
+
 document.querySelector("#post-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   clearNotice();
@@ -688,6 +1007,10 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   }
   if (checkedGroups.length === 0) {
     notify("Выберите хотя бы одну группу.", "error");
+    return;
+  }
+  if (isPastOrNow(new Date(nextRun).toISOString())) {
+    notify("Выберите будущую дату отправки.", "error");
     return;
   }
 

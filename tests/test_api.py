@@ -6,7 +6,16 @@ from datetime import UTC, datetime, timedelta
 
 from autopost_manager import api as api_module
 from autopost_manager.db import SessionLocal
-from autopost_manager.models import Post, PostMedia, PublishJob, SessionStatus, TargetChat, TargetChatType
+from autopost_manager.models import (
+    JobStatus,
+    Post,
+    PostMedia,
+    PostStatus,
+    PublishJob,
+    SessionStatus,
+    TargetChat,
+    TargetChatType,
+)
 
 from conftest import make_chat, make_job, make_media, make_post, make_session
 
@@ -637,6 +646,89 @@ def test_schedule_existing_telegram_draft(client, auth_user, db_session) -> None
     assert data["default_session_id"] == str(session.id)
     assert data["target_chat_ids"] == [str(chat.id)]
     assert data["media"][0]["media_type"] == "photo"
+
+
+def test_schedule_existing_post_edits_targets_and_cancels_pending_jobs(
+    client,
+    auth_user,
+    db_session,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    old_chat = make_chat(db_session, session, title="Old")
+    new_chat = make_chat(db_session, session, title="New", telegram_chat_id=-1002)
+    post = make_post(db_session, owner_id=111, session=session, chats=[old_chat])
+    job = make_job(db_session, post, old_chat, session=session, status=JobStatus.pending)
+    db_session.commit()
+    auth_user(111)
+
+    response = client.post(
+        f"/api/posts/{post.id}/schedule",
+        json={
+            "schedule_kind": "interval",
+            "next_run_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+            "interval_minutes": 45,
+            "spam_risk_acknowledged": True,
+            "default_session_id": str(session.id),
+            "target_chat_ids": [str(new_chat.id)],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "scheduled"
+    assert data["schedule_kind"] == "interval"
+    assert data["target_chat_ids"] == [str(new_chat.id)]
+
+    db_session.refresh(job)
+    db_session.refresh(post)
+    assert job.status == JobStatus.cancelled
+    assert [target.target_chat_id for target in post.targets] == [new_chat.id]
+
+
+def test_pause_post_cancels_pending_jobs(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    pending = make_job(db_session, post, chat, session=session, status=JobStatus.pending)
+    done = make_job(db_session, post, chat, session=session, status=JobStatus.done)
+    db_session.commit()
+    auth_user(111)
+
+    response = client.patch(f"/api/posts/{post.id}/pause")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "paused"
+    db_session.refresh(pending)
+    db_session.refresh(done)
+    assert pending.status == JobStatus.cancelled
+    assert done.status == JobStatus.done
+
+
+def test_resume_paused_post_requires_future_date(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        status=PostStatus.paused,
+        next_run_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    db_session.commit()
+    auth_user(111)
+
+    missing_date = client.patch(f"/api/posts/{post.id}/resume", json={})
+    assert missing_date.status_code == 422
+    assert "новую будущую дату" in missing_date.text
+
+    response = client.patch(
+        f"/api/posts/{post.id}/resume",
+        json={"next_run_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat()},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "scheduled"
 
 
 def test_schedule_existing_post_rejects_foreign_or_disabled_targets(
