@@ -13,6 +13,8 @@ const state = {
   chats: [],
   folders: [],
   posts: [],
+  audit: { items: [], page: 1, page_size: 20, total: 0 },
+  activeTab: "posts",
   pendingSessionId: null,
   selectedDraftId: null,
   selectedChatIds: new Set(),
@@ -21,6 +23,8 @@ const state = {
   draftPageSize: 5,
   queuePage: 1,
   queuePageSize: 5,
+  auditPage: 1,
+  auditPageSize: 20,
   groupSearch: "",
   groupPage: 1,
   groupPageSize: 10,
@@ -207,16 +211,30 @@ function statusLabel(status) {
   return status;
 }
 
+function auditStatusLabel(status) {
+  if (status === "done") return "Успешно";
+  if (status === "failed") return "Ошибка";
+  if (status === "pending") return "Ожидает";
+  if (status === "processing") return "Отправляется";
+  if (status === "cancelled") return "Отменено";
+  return status;
+}
+
+function formatDateTime(value) {
+  if (!value) return "нет даты";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "нет даты";
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function scheduleLabel(post) {
-  const when = post.next_run_at
-    ? new Date(post.next_run_at).toLocaleString("ru-RU", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "дата не выбрана";
+  const when = post.next_run_at ? formatDateTime(post.next_run_at) : "дата не выбрана";
   if (post.schedule_kind === "interval") {
     return `${when}, затем каждые ${post.interval_minutes} мин.`;
   }
@@ -300,6 +318,8 @@ function render() {
   const drafts = draftPosts();
   const queued = queuePosts();
 
+  applyTabVisibility();
+
   document.querySelector("#posts-count").textContent = `${queued.length} постов`;
   document.querySelector("#drafts-count").textContent = `${drafts.length} постов`;
   document.querySelector("#groups-count").textContent = `${filteredChats().length} групп`;
@@ -342,6 +362,18 @@ function render() {
     posts.replaceChildren(...pageSlice(queued, state.queuePage, state.queuePageSize).map(renderPost));
     renderQueuePagination(queued.length);
   }
+
+  renderAudit();
+  applyTabVisibility();
+}
+
+function applyTabVisibility() {
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.tab === state.activeTab);
+  });
+  document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== state.activeTab;
+  });
 }
 
 function renderFolderPicker() {
@@ -439,6 +471,62 @@ function renderQueuePagination(total) {
   document.querySelector("#queue-page").textContent = `${state.queuePage} / ${pages}`;
   document.querySelector("#posts-prev").disabled = state.queuePage <= 1;
   document.querySelector("#posts-next").disabled = state.queuePage >= pages;
+}
+
+function renderAuditPagination() {
+  const pagination = document.querySelector("#audit-pagination");
+  const total = state.audit.total || 0;
+  const pages = pageCount(total, state.auditPageSize);
+  state.auditPage = clampPage(state.audit.page || state.auditPage, total, state.auditPageSize);
+  pagination.hidden = total <= state.auditPageSize;
+  document.querySelector("#audit-page").textContent = `${state.auditPage} / ${pages}`;
+  document.querySelector("#audit-prev").disabled = state.auditPage <= 1;
+  document.querySelector("#audit-next").disabled = state.auditPage >= pages;
+}
+
+function renderAudit() {
+  const total = state.audit.total || 0;
+  document.querySelector("#audit-count").textContent = `${total} записей`;
+  renderAuditPagination();
+
+  const list = document.querySelector("#audit-list");
+  if (total === 0) {
+    list.replaceChildren(emptyPost(activeSessions().length ? "Истории отправок пока нет" : "Подключите аккаунт"));
+    return;
+  }
+
+  list.replaceChildren(...state.audit.items.map(renderAuditItem));
+}
+
+function renderAuditItem(item) {
+  const node = document.createElement("article");
+  node.className = `audit-item ${item.status}`.trim();
+  const preview = stripHtml(item.post_preview || item.post_title || "");
+  node.innerHTML = `
+    <div class="audit-item-head">
+      <div>
+        <strong data-field="title"></strong>
+        <p data-field="preview"></p>
+      </div>
+      <span data-field="status"></span>
+    </div>
+    <dl class="audit-meta">
+      <div><dt>Куда</dt><dd data-field="target"></dd></div>
+      <div><dt>Когда</dt><dd data-field="time"></dd></div>
+      <div><dt>Результат</dt><dd data-field="result"></dd></div>
+    </dl>
+  `;
+  node.querySelector('[data-field="title"]').textContent = item.post_title || "Пост из Telegram";
+  node.querySelector('[data-field="preview"]').textContent =
+    preview.length > 160 ? `${preview.slice(0, 160)}...` : preview || "Медиа без текста";
+  node.querySelector('[data-field="status"]').textContent = auditStatusLabel(item.status);
+  node.querySelector('[data-field="target"]').textContent = item.target_chat_title || "Группа не найдена";
+  node.querySelector('[data-field="time"]').textContent = formatDateTime(item.updated_at || item.due_at);
+  node.querySelector('[data-field="result"]').textContent =
+    item.status === "done"
+      ? `Отправлено${item.telegram_message_id ? `, message id ${item.telegram_message_id}` : ""}`
+      : item.last_error || auditStatusLabel(item.status);
+  return node;
 }
 
 function renderGroupPicker() {
@@ -657,18 +745,20 @@ function deletionMessage(result) {
 }
 
 async function load(options = {}) {
-  const [config, sessions, chats, folders, posts] = await Promise.all([
+  const [config, sessions, chats, folders, posts, audit] = await Promise.all([
     api("app-config"),
     api("sessions"),
     api("chats"),
     api("folders"),
     api("posts"),
+    api(`audit?page=${state.auditPage}&page_size=${state.auditPageSize}`),
   ]);
   state.config = config;
   state.sessions = sessions;
   state.chats = chats;
   state.folders = folders;
   state.posts = posts;
+  state.audit = audit;
   if (!state.folders.some((folder) => String(folder.id) === state.selectedFolderId)) {
     state.selectedFolderId = "all";
   }
@@ -748,6 +838,17 @@ async function togglePausePost(post) {
 document.querySelector("#refresh").addEventListener("click", () => {
   clearNotice();
   load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelectorAll(".tab-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.activeTab = button.dataset.tab;
+    if (state.activeTab === "audit") {
+      load().catch((error) => notify(error.message, "error"));
+      return;
+    }
+    render();
+  });
 });
 
 document.querySelector("#logout-account").addEventListener("click", async () => {
@@ -837,6 +938,16 @@ document.querySelector("#posts-prev").addEventListener("click", () => {
 document.querySelector("#posts-next").addEventListener("click", () => {
   state.queuePage += 1;
   render();
+});
+
+document.querySelector("#audit-prev").addEventListener("click", () => {
+  state.auditPage -= 1;
+  load().catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#audit-next").addEventListener("click", () => {
+  state.auditPage += 1;
+  load().catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {

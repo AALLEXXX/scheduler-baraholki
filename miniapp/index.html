@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-9" />
+    <link rel="stylesheet" href="styles.css?v=20260623-10" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -19,7 +19,12 @@
 
       <div id="notice" class="notice" hidden></div>
 
-      <section class="status-panel">
+      <nav class="tab-bar" aria-label="Разделы">
+        <button class="tab-button selected" type="button" data-tab="posts">Посты</button>
+        <button class="tab-button" type="button" data-tab="audit">Аудит</button>
+      </nav>
+
+      <section class="status-panel" data-tab-panel="posts">
         <div>
           <span id="account-state" class="status-dot"></span>
           <p id="account-title">Проверяем аккаунт</p>
@@ -30,7 +35,7 @@
         </div>
       </section>
 
-      <section id="connect-panel" class="panel accent-panel">
+      <section id="connect-panel" class="panel accent-panel" data-tab-panel="posts">
         <div class="panel-heading">
           <h2>Подключить аккаунт</h2>
           <p>Введите номер телефона. Код придёт в Telegram.</p>
@@ -61,7 +66,7 @@
         </form>
       </section>
 
-      <section class="panel composer-panel">
+      <section class="panel composer-panel" data-tab-panel="posts">
         <div class="panel-heading">
           <h2>Новый пост</h2>
           <p id="compose-hint">Сначала подключите аккаунт.</p>
@@ -134,7 +139,7 @@
         </form>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-tab-panel="posts">
         <div class="panel-heading compact">
           <h2>Очередь</h2>
           <p id="posts-count">0 постов</p>
@@ -145,6 +150,22 @@
           <span id="queue-page">1 / 1</span>
           <button id="posts-next" type="button">Дальше</button>
         </div>
+      </section>
+
+      <section class="panel" data-tab-panel="audit" hidden>
+        <div class="panel-heading compact">
+          <div>
+            <h2>Аудит действий</h2>
+            <p>История отправок по группам и результатам.</p>
+          </div>
+          <p id="audit-count">0 записей</p>
+        </div>
+        <div id="audit-pagination" class="pagination audit-pagination" hidden>
+          <button id="audit-prev" type="button">Назад</button>
+          <span id="audit-page">1 / 1</span>
+          <button id="audit-next" type="button">Дальше</button>
+        </div>
+        <div id="audit-list" class="audit-list"></div>
       </section>
 
       <div id="edit-modal" class="modal-backdrop" hidden>
@@ -205,6 +226,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260623-9"></script>
+    <script src="app.js?v=20260623-10"></script>
   </body>
 </html>

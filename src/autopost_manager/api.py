@@ -7,9 +7,9 @@ from pathlib import Path
 
 import uvicorn
 from aiogram import Bot
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
@@ -34,6 +34,8 @@ from autopost_manager.schemas import (
     AccountPasswordConfirm,
     AccountStartLogin,
     AppConfigOut,
+    AuditItemOut,
+    AuditPageOut,
     DeletePostOut,
     DialogFolderOut,
     JobOut,
@@ -814,6 +816,58 @@ def list_jobs(
             .order_by(PublishJob.created_at.desc())
             .limit(100)
         )
+    )
+
+
+@app.get("/api/audit", response_model=AuditPageOut)
+def list_audit(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AuditPageOut:
+    if not active_account(telegram_user_id=telegram_user_id, db=db):
+        return AuditPageOut(items=[], page=page, page_size=page_size, total=0)
+
+    base_query = (
+        select(PublishJob, Post, TargetChat)
+        .join(Post, PublishJob.post_id == Post.id)
+        .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
+        .where(Post.created_by_telegram_id == telegram_user_id)
+    )
+    total = db.scalar(
+        select(func.count())
+        .select_from(PublishJob)
+        .join(Post, PublishJob.post_id == Post.id)
+        .where(Post.created_by_telegram_id == telegram_user_id)
+    )
+    rows = db.execute(
+        base_query.order_by(PublishJob.updated_at.desc(), PublishJob.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    return AuditPageOut(
+        items=[
+            AuditItemOut(
+                id=job.id,
+                post_id=post.id,
+                post_title=post.title,
+                post_preview=post.body,
+                target_chat_id=chat.id,
+                target_chat_title=chat.title,
+                due_at=job.due_at,
+                updated_at=job.updated_at,
+                status=job.status,
+                attempts=job.attempts,
+                telegram_message_id=job.telegram_message_id,
+                last_error=job.last_error,
+            )
+            for job, post, chat in rows
+        ],
+        page=page,
+        page_size=page_size,
+        total=total or 0,
     )
 
 

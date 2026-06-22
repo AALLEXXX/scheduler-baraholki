@@ -187,6 +187,36 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "[hidden]" in css
 
 
+def test_miniapp_has_audit_tab_with_top_pagination() -> None:
+    html = read("index.html")
+    js = read("app.js")
+    css = read("styles.css")
+
+    for element_id in [
+        "audit-count",
+        "audit-pagination",
+        "audit-prev",
+        "audit-next",
+        "audit-page",
+        "audit-list",
+    ]:
+        assert f'id="{element_id}"' in html
+        assert f"#{element_id}" in js
+
+    assert 'data-tab="audit"' in html
+    assert 'data-tab-panel="audit"' in html
+    assert "auditPageSize: 20" in js
+    assert 'api(`audit?page=${state.auditPage}&page_size=${state.auditPageSize}`)' in js
+    assert "function renderAudit" in js
+    assert "function renderAuditPagination" in js
+    assert "function auditStatusLabel" in js
+    assert "Успешно" in js
+    assert "Ошибка" in js
+    assert ".tab-bar" in css
+    assert ".audit-list" in css
+    assert ".audit-pagination" in css
+
+
 def test_miniapp_datetime_inputs_are_constrained_on_mobile() -> None:
     html = read("index.html")
     css = read("styles.css")
@@ -211,7 +241,7 @@ def test_miniapp_spam_guard_is_visible_in_ui_and_payload() -> None:
 
 def test_miniapp_cache_bust_versions_match_for_css_and_js() -> None:
     html = read("index.html")
-    versions = re.findall(r"[.?&]v=(\d{8}-\d)", html)
+    versions = re.findall(r"[.?&]v=(\d{8}-\d+)", html)
 
     assert versions
     assert len(set(versions)) == 1

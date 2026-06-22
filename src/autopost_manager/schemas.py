@@ -151,3 +151,25 @@ class JobOut(BaseModel):
     telegram_message_id: int | None
 
     model_config = {"from_attributes": True}
+
+
+class AuditItemOut(BaseModel):
+    id: uuid.UUID
+    post_id: uuid.UUID
+    post_title: str
+    post_preview: str
+    target_chat_id: uuid.UUID
+    target_chat_title: str
+    due_at: datetime
+    updated_at: datetime
+    status: JobStatus
+    attempts: int
+    telegram_message_id: int | None
+    last_error: str | None
+
+
+class AuditPageOut(BaseModel):
+    items: list[AuditItemOut]
+    page: int
+    page_size: int
+    total: int

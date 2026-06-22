@@ -973,3 +973,52 @@ def test_enqueue_now_and_jobs_are_scoped_to_owner(client, auth_user, db_session)
     assert jobs.status_code == 200
     assert len(jobs.json()) == 1
     assert jobs.json()[0]["post_id"] == str(post.id)
+
+
+def test_audit_lists_owner_jobs_with_post_and_target_details(
+    client,
+    auth_user,
+    db_session,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session, title="Main Group")
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat], body="Audit body")
+    done_job = make_job(db_session, post, chat, session=session, status=JobStatus.done)
+    done_job.telegram_message_id = 123
+    failed_job = make_job(db_session, post, chat, session=session, status=JobStatus.failed)
+    failed_job.last_error = "Telegram refused"
+
+    other_session = make_session(db_session, owner_id=222)
+    other_chat = make_chat(db_session, other_session, title="Other Group")
+    other_post = make_post(db_session, owner_id=222, session=other_session, chats=[other_chat])
+    make_job(db_session, other_post, other_chat, session=other_session, status=JobStatus.done)
+    db_session.commit()
+
+    auth_user(111)
+    response = client.get("/api/audit?page=1&page_size=1")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["page"] == 1
+    assert data["page_size"] == 1
+    assert data["total"] == 2
+    assert len(data["items"]) == 1
+    assert data["items"][0]["post_id"] == str(post.id)
+    assert data["items"][0]["post_title"] == post.title
+    assert data["items"][0]["post_preview"] == "Audit body"
+    assert data["items"][0]["target_chat_title"] == "Main Group"
+    assert data["items"][0]["status"] in {done_job.status.value, failed_job.status.value}
+
+
+def test_audit_requires_active_account(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111, status=SessionStatus.revoked)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    make_job(db_session, post, chat, session=session, status=JobStatus.done)
+    db_session.commit()
+
+    auth_user(111)
+    response = client.get("/api/audit")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "page": 1, "page_size": 20, "total": 0}
