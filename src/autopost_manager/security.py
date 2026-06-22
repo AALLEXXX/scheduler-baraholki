@@ -35,7 +35,7 @@ def verify_webapp_init_data(init_data: str, bot_token: str, max_age_seconds: int
     return user_id
 
 
-def require_admin(x_telegram_init_data: str | None = Header(default=None)) -> int:
+def require_user(x_telegram_init_data: str | None = Header(default=None)) -> int:
     settings = get_settings()
     if settings.app_env == "local" and not x_telegram_init_data:
         return 0
@@ -46,6 +46,7 @@ def require_admin(x_telegram_init_data: str | None = Header(default=None)) -> in
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
-    if settings.admin_ids and telegram_id not in settings.admin_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return telegram_id
+
+
+require_admin = require_user

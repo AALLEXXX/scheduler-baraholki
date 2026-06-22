@@ -20,6 +20,28 @@ class TelegramSessionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AccountStartLogin(BaseModel):
+    api_id: int = Field(gt=0)
+    api_hash: str = Field(min_length=16, max_length=160)
+    phone: str = Field(min_length=5, max_length=40)
+
+
+class AccountCodeConfirm(BaseModel):
+    session_id: uuid.UUID
+    code: str = Field(min_length=3, max_length=20)
+
+
+class AccountPasswordConfirm(BaseModel):
+    session_id: uuid.UUID
+    password: str = Field(min_length=1, max_length=300)
+
+
+class AccountLoginOut(BaseModel):
+    session_id: uuid.UUID
+    status: SessionStatus
+    message: str
+
+
 class TargetChatCreate(BaseModel):
     session_id: uuid.UUID | None = None
     telegram_chat_id: int

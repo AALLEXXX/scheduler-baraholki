@@ -14,8 +14,12 @@ from autopost_manager.telegram_client import classify_send_error, send_message_f
 def choose_session(db, job: PublishJob) -> TelegramSession | None:
     if job.session and job.session.status == SessionStatus.active:
         return job.session
+    owner_id = job.post.created_by_telegram_id
+    if owner_id is None:
+        return None
     return db.scalars(
         select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == owner_id)
         .where(TelegramSession.status == SessionStatus.active)
         .order_by(TelegramSession.last_send_at.asc().nullsfirst())
         .limit(1)

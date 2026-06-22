@@ -3,88 +3,123 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Autopost Manager</title>
+    <title>Барахолки</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar">
+    <main class="app-shell">
+      <header class="app-header">
         <div>
-          <h1>Autopost</h1>
-          <p id="status">Loading...</p>
+          <p class="eyebrow">Автопостинг</p>
+          <h1>Барахолки</h1>
         </div>
-        <button id="refresh" type="button">Refresh</button>
+        <button id="refresh" class="icon-button" type="button" aria-label="Обновить">↻</button>
       </header>
+
       <div id="notice" class="notice" hidden></div>
 
-      <section class="grid">
-        <article>
-          <h2>Telegram accounts</h2>
-          <p class="hint">Accounts that send posts from their own Telegram session.</p>
-          <div id="sessions" class="list"></div>
-        </article>
-
-        <article>
-          <h2>Destination groups</h2>
-          <p class="hint">Groups and channels where selected accounts can publish.</p>
-          <div id="chats" class="list"></div>
-        </article>
+      <section class="status-panel">
+        <div>
+          <span id="account-state" class="status-dot"></span>
+          <p id="account-title">Проверяем аккаунт</p>
+          <strong id="account-subtitle">...</strong>
+        </div>
+        <button id="sync-groups" type="button" hidden>Обновить группы</button>
       </section>
 
-      <section>
-        <h2>Add destination manually</h2>
-        <form id="chat-form" class="compact-form">
+      <section id="connect-panel" class="panel accent-panel">
+        <div class="panel-heading">
+          <h2>Подключить аккаунт</h2>
+          <p>API ID, API Hash и номер нужны один раз.</p>
+        </div>
+
+        <form id="login-form" class="stack">
+          <div class="form-grid">
+            <label>
+              API ID
+              <input name="api_id" inputmode="numeric" autocomplete="off" required />
+            </label>
+            <label>
+              API Hash
+              <input name="api_hash" autocomplete="off" required />
+            </label>
+          </div>
           <label>
-            Title
-            <input name="title" required maxlength="240" placeholder="Group name" />
+            Телефон
+            <input name="phone" autocomplete="tel" placeholder="+995..." required />
           </label>
+          <button id="send-code" type="submit">Получить код</button>
+        </form>
+
+        <form id="code-form" class="stack" hidden>
           <label>
-            Chat ID
-            <input name="telegram_chat_id" required inputmode="numeric" placeholder="-1001234567890" />
+            Код из Telegram
+            <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
           </label>
+          <button type="submit">Подключить</button>
+        </form>
+
+        <form id="password-form" class="stack" hidden>
           <label>
-            Linked account
-            <select name="session_id"></select>
+            Пароль 2FA
+            <input name="password" type="password" autocomplete="current-password" required />
           </label>
-          <button type="submit">Add group</button>
+          <button type="submit">Завершить</button>
         </form>
       </section>
 
-      <section>
-        <h2>New post</h2>
-        <form id="post-form">
-          <label>
-            Title
-            <input name="title" required maxlength="200" />
+      <section class="panel composer-panel">
+        <div class="panel-heading">
+          <h2>Новый пост</h2>
+          <p id="compose-hint">Сначала подключите аккаунт.</p>
+        </div>
+
+        <form id="post-form" class="stack">
+          <textarea name="body" maxlength="4096" placeholder="Текст поста" required></textarea>
+
+          <div class="form-grid">
+            <label>
+              Когда
+              <input name="next_run_at" type="datetime-local" required />
+            </label>
+            <label>
+              Повтор
+              <select name="schedule_kind">
+                <option value="once">Один раз</option>
+                <option value="interval">Каждые N минут</option>
+              </select>
+            </label>
+          </div>
+
+          <label id="interval-row" hidden>
+            Интервал, минут
+            <input name="interval_minutes" type="number" min="1" value="60" />
           </label>
-          <label>
-            Text
-            <textarea name="body" required maxlength="4096"></textarea>
-          </label>
-          <label>
-            Next run
-            <input name="next_run_at" type="datetime-local" />
-          </label>
-          <label>
-            Interval minutes
-            <input name="interval_minutes" type="number" min="1" placeholder="empty for once" />
-          </label>
-          <label>
-            Telegram account
+
+          <label id="account-row" hidden>
+            Отправлять от
             <select name="default_session_id"></select>
           </label>
-          <fieldset>
-            <legend>Destination groups</legend>
-            <div id="target-checkboxes" class="checks"></div>
-          </fieldset>
-          <button id="save-post" type="submit">Save post</button>
+
+          <div>
+            <div class="section-row">
+              <span>Куда отправлять</span>
+              <small id="groups-count">0 групп</small>
+            </div>
+            <div id="group-picker" class="chip-grid"></div>
+          </div>
+
+          <button id="save-post" type="submit">Запланировать</button>
         </form>
       </section>
 
-      <section>
-        <h2>Posts</h2>
-        <div id="posts" class="list"></div>
+      <section class="panel">
+        <div class="panel-heading compact">
+          <h2>Очередь</h2>
+          <p id="posts-count">0 постов</p>
+        </div>
+        <div id="posts" class="post-list"></div>
       </section>
     </main>
     <script src="app.js"></script>

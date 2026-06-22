@@ -14,11 +14,16 @@ from autopost_manager.models import (
     PostStatus,
     PostTarget,
     PublishJob,
+    SessionStatus,
     TargetChat,
     TargetChatType,
     TelegramSession,
 )
 from autopost_manager.schemas import (
+    AccountCodeConfirm,
+    AccountLoginOut,
+    AccountPasswordConfirm,
+    AccountStartLogin,
     JobOut,
     PostCreate,
     PostOut,
@@ -26,8 +31,13 @@ from autopost_manager.schemas import (
     TargetChatOut,
     TelegramSessionOut,
 )
-from autopost_manager.security import require_admin
-from autopost_manager.telegram_client import list_dialogs_from_session
+from autopost_manager.security import require_user
+from autopost_manager.telegram_client import (
+    confirm_login_code,
+    confirm_login_password,
+    list_dialogs_from_session,
+    request_login_code,
+)
 
 app = FastAPI(title="Autopost Manager")
 
@@ -50,20 +60,130 @@ def health() -> dict[str, object]:
 
 @app.get("/api/sessions", response_model=list[TelegramSessionOut])
 def list_sessions(
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TelegramSession]:
-    return list(db.scalars(select(TelegramSession).order_by(TelegramSession.created_at.desc())))
+    return list(
+        db.scalars(
+            select(TelegramSession)
+            .where(TelegramSession.owner_telegram_id == telegram_user_id)
+            .order_by(TelegramSession.created_at.desc())
+        )
+    )
+
+
+@app.post("/api/account/start-login", response_model=AccountLoginOut)
+async def start_account_login(
+    payload: AccountStartLogin,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountLoginOut:
+    settings = get_settings()
+    safe_phone = "".join(ch for ch in payload.phone if ch.isdigit())
+    session_name = f"tg_{telegram_user_id}_{safe_phone[-8:] or 'account'}"
+    session_path = str(settings.telegram_sessions_dir / session_name)
+
+    session = db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+        .where(TelegramSession.phone == payload.phone)
+    ).first()
+    if not session:
+        session = TelegramSession(
+            owner_telegram_id=telegram_user_id,
+            name=session_name,
+            phone=payload.phone,
+            api_id=payload.api_id,
+            api_hash=payload.api_hash,
+            session_path=session_path,
+            status=SessionStatus.credentials_needed,
+            min_send_interval_seconds=settings.default_min_send_interval_seconds,
+        )
+        db.add(session)
+        db.flush()
+    else:
+        session.api_id = payload.api_id
+        session.api_hash = payload.api_hash
+        session.session_path = session.session_path or session_path
+
+    try:
+        session.phone_code_hash = await request_login_code(session)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Could not send Telegram code: {exc}") from exc
+
+    session.status = SessionStatus.code_needed
+    db.commit()
+    return AccountLoginOut(
+        session_id=session.id,
+        status=session.status,
+        message="Telegram sent a login code. Enter it below.",
+    )
+
+
+@app.post("/api/account/confirm-code", response_model=AccountLoginOut)
+async def confirm_account_code(
+    payload: AccountCodeConfirm,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountLoginOut:
+    session = db.get(TelegramSession, payload.session_id)
+    if not session or session.owner_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    try:
+        completed, me = await confirm_login_code(session, payload.code)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not confirm code: {exc}") from exc
+
+    if not completed:
+        session.status = SessionStatus.password_needed
+        db.commit()
+        return AccountLoginOut(
+            session_id=session.id,
+            status=session.status,
+            message="Two-step verification is enabled. Enter your Telegram password.",
+        )
+
+    session.telegram_user_id = me.id
+    session.username = me.username
+    session.status = SessionStatus.active
+    session.phone_code_hash = None
+    db.commit()
+    return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
+
+
+@app.post("/api/account/confirm-password", response_model=AccountLoginOut)
+async def confirm_account_password(
+    payload: AccountPasswordConfirm,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountLoginOut:
+    session = db.get(TelegramSession, payload.session_id)
+    if not session or session.owner_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    try:
+        me = await confirm_login_password(session, payload.password)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not confirm password: {exc}") from exc
+
+    session.telegram_user_id = me.id
+    session.username = me.username
+    session.status = SessionStatus.active
+    session.phone_code_hash = None
+    db.commit()
+    return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
 @app.post("/api/sessions/{session_id}/sync-chats")
 async def sync_session_chats(
     session_id: uuid.UUID,
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
     sender_session = db.get(TelegramSession, session_id)
-    if not sender_session:
+    if not sender_session or sender_session.owner_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Telegram account not found")
 
     try:
@@ -86,6 +206,7 @@ async def sync_session_chats(
         else:
             db.add(
                 TargetChat(
+                    owner_telegram_id=telegram_user_id,
                     session_id=sender_session.id,
                     telegram_chat_id=int(dialog["telegram_chat_id"]),
                     title=str(dialog["title"]),
@@ -101,30 +222,39 @@ async def sync_session_chats(
 
 @app.get("/api/chats", response_model=list[TargetChatOut])
 def list_chats(
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TargetChat]:
-    return list(db.scalars(select(TargetChat).order_by(TargetChat.title)))
+    return list(
+        db.scalars(
+            select(TargetChat)
+            .where(TargetChat.owner_telegram_id == telegram_user_id)
+            .order_by(TargetChat.title)
+        )
+    )
 
 
 @app.post("/api/chats", response_model=TargetChatOut)
 def create_chat(
     payload: TargetChatCreate,
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> TargetChat:
-    if payload.session_id and not db.get(TelegramSession, payload.session_id):
-        raise HTTPException(status_code=404, detail="Telegram account not found")
+    if payload.session_id:
+        session = db.get(TelegramSession, payload.session_id)
+        if not session or session.owner_telegram_id != telegram_user_id:
+            raise HTTPException(status_code=404, detail="Telegram account not found")
 
     existing = db.scalars(
         select(TargetChat)
         .where(TargetChat.session_id == payload.session_id)
+        .where(TargetChat.owner_telegram_id == telegram_user_id)
         .where(TargetChat.telegram_chat_id == payload.telegram_chat_id)
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail="This destination group is already added")
 
-    chat = TargetChat(**payload.model_dump())
+    chat = TargetChat(**payload.model_dump(), owner_telegram_id=telegram_user_id)
     db.add(chat)
     db.commit()
     db.refresh(chat)
@@ -133,10 +263,18 @@ def create_chat(
 
 @app.get("/api/posts", response_model=list[PostOut])
 def list_posts(
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[PostOut]:
-    posts = db.scalars(select(Post).order_by(Post.created_at.desc())).unique().all()
+    posts = (
+        db.scalars(
+            select(Post)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+            .order_by(Post.created_at.desc())
+        )
+        .unique()
+        .all()
+    )
     return [
         PostOut(
             id=post.id,
@@ -159,17 +297,27 @@ def list_posts(
 @app.post("/api/posts", response_model=PostOut)
 def create_post(
     payload: PostCreate,
-    admin_telegram_id: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
     if payload.status == PostStatus.scheduled:
         if not payload.default_session_id:
             raise HTTPException(status_code=422, detail="Choose a Telegram account before scheduling")
         if not payload.target_chat_ids:
-            raise HTTPException(status_code=422, detail="Choose at least one destination group")
+            raise HTTPException(status_code=422, detail="Choose at least one group")
+
+    if payload.default_session_id:
+        session = db.get(TelegramSession, payload.default_session_id)
+        if not session or session.owner_telegram_id != telegram_user_id:
+            raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    for target_chat_id in payload.target_chat_ids:
+        target = db.get(TargetChat, target_chat_id)
+        if not target or target.owner_telegram_id != telegram_user_id:
+            raise HTTPException(status_code=404, detail="Group not found")
 
     post_data = payload.model_dump(exclude={"target_chat_ids"})
-    post = Post(**post_data, created_by_telegram_id=admin_telegram_id)
+    post = Post(**post_data, created_by_telegram_id=telegram_user_id)
     db.add(post)
     db.flush()
     for target_chat_id in payload.target_chat_ids:
@@ -195,11 +343,11 @@ def create_post(
 @app.post("/api/posts/{post_id}/enqueue-now")
 def enqueue_now(
     post_id: uuid.UUID,
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     post = db.get(Post, post_id)
-    if not post:
+    if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
 
     count = 0
@@ -219,10 +367,18 @@ def enqueue_now(
 
 @app.get("/api/jobs", response_model=list[JobOut])
 def list_jobs(
-    _: int = Depends(require_admin),
+    telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[PublishJob]:
-    return list(db.scalars(select(PublishJob).order_by(PublishJob.created_at.desc()).limit(100)))
+    return list(
+        db.scalars(
+            select(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+            .order_by(PublishJob.created_at.desc())
+            .limit(100)
+        )
+    )
 
 
 def main() -> None:

@@ -10,10 +10,7 @@ from autopost_manager.config import get_settings
 
 
 def admin_only(message: Message) -> bool:
-    settings = get_settings()
-    if settings.app_env == "local" and not settings.admin_ids:
-        return True
-    return bool(message.from_user and message.from_user.id in settings.admin_ids)
+    return bool(message.from_user)
 
 
 async def start(message: Message) -> None:
@@ -32,14 +29,14 @@ async def start(message: Message) -> None:
             ]
         ]
     )
-    await message.answer("Autopost Manager is ready.", reply_markup=keyboard)
+    await message.answer("Барахолки готовы. Открой панель и подключи Telegram-аккаунт.", reply_markup=keyboard)
 
 
 async def status(message: Message) -> None:
     if not admin_only(message):
         await message.answer("Access denied.")
         return
-    await message.answer("API, scheduler, and worker run as separate services.")
+    await message.answer("Сервис работает. Посты отправляются через подключенные аккаунты пользователей.")
 
 
 async def run_bot() -> None:

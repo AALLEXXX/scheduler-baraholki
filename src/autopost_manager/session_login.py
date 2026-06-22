@@ -35,6 +35,7 @@ async def login_session(name: str, phone: str) -> None:
         else:
             db.add(
                 TelegramSession(
+                    owner_telegram_id=None,
                     name=name,
                     phone=phone,
                     telegram_user_id=me.id,

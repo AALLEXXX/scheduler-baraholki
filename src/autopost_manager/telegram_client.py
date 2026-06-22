@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, SessionPasswordNeededError
 
 from autopost_manager.config import get_settings
 from autopost_manager.models import SessionStatus, TelegramSession
@@ -17,6 +17,13 @@ def _lock_for(session_path: str) -> asyncio.Lock:
     if session_path not in _locks:
         _locks[session_path] = asyncio.Lock()
     return _locks[session_path]
+
+
+def build_client(session: TelegramSession) -> TelegramClient:
+    settings = get_settings()
+    api_id = session.api_id or settings.telegram_api_id
+    api_hash = session.api_hash or settings.telegram_api_hash
+    return TelegramClient(session.session_path, api_id, api_hash)
 
 
 async def send_message_from_session(
@@ -37,11 +44,7 @@ async def send_message_from_session(
             if wait_seconds:
                 await asyncio.sleep(wait_seconds)
 
-        client = TelegramClient(
-            session.session_path,
-            settings.telegram_api_id,
-            settings.telegram_api_hash,
-        )
+        client = build_client(session)
         async with client:
             if not await client.is_user_authorized():
                 session.status = SessionStatus.needs_login
@@ -64,12 +67,7 @@ def classify_send_error(exc: Exception, session: TelegramSession | None = None) 
 
 
 async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, object]]:
-    settings = get_settings()
-    client = TelegramClient(
-        session.session_path,
-        settings.telegram_api_id,
-        settings.telegram_api_hash,
-    )
+    client = build_client(session)
     rows: list[dict[str, object]] = []
     async with client:
         if not await client.is_user_authorized():
@@ -89,3 +87,32 @@ async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, 
                 }
             )
     return rows
+
+
+async def request_login_code(session: TelegramSession) -> str:
+    client = build_client(session)
+    async with client:
+        sent_code = await client.send_code_request(session.phone)
+    return sent_code.phone_code_hash
+
+
+async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool, object | None]:
+    client = build_client(session)
+    async with client:
+        try:
+            await client.sign_in(
+                phone=session.phone,
+                code=code,
+                phone_code_hash=session.phone_code_hash,
+            )
+        except SessionPasswordNeededError:
+            return False, None
+        me = await client.get_me()
+        return True, me
+
+
+async def confirm_login_password(session: TelegramSession, password: str) -> object:
+    client = build_client(session)
+    async with client:
+        await client.sign_in(password=password)
+        return await client.get_me()

@@ -15,6 +15,9 @@ def utcnow() -> datetime:
 
 
 class SessionStatus(str, enum.Enum):
+    credentials_needed = "credentials_needed"
+    code_needed = "code_needed"
+    password_needed = "password_needed"
     needs_login = "needs_login"
     active = "active"
     paused = "paused"
@@ -54,10 +57,14 @@ class TelegramSession(Base):
     __tablename__ = "telegram_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     phone: Mapped[str | None] = mapped_column(String(40))
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger)
     username: Mapped[str | None] = mapped_column(String(120))
+    api_id: Mapped[int | None] = mapped_column(Integer)
+    api_hash: Mapped[str | None] = mapped_column(String(160))
+    phone_code_hash: Mapped[str | None] = mapped_column(String(300))
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus), default=SessionStatus.needs_login
     )
@@ -77,6 +84,7 @@ class TargetChat(Base):
     __table_args__ = (UniqueConstraint("session_id", "telegram_chat_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger)
     title: Mapped[str] = mapped_column(String(240))
