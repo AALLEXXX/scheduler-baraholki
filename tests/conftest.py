@@ -28,6 +28,7 @@ from autopost_manager.db import Base, SessionLocal, engine  # noqa: E402
 from autopost_manager.models import (  # noqa: E402
     JobStatus,
     Post,
+    PostMedia,
     PostStatus,
     PostTarget,
     PublishJob,
@@ -152,6 +153,30 @@ def make_post(
         db.add(PostTarget(post_id=post.id, target_chat_id=chat.id))
     db.flush()
     return post
+
+
+def make_media(
+    db,
+    post: Post,
+    *,
+    media_type: str = "photo",
+    file_id: str | None = None,
+    source_bot_message_id: int = 10,
+    order_index: int = 0,
+) -> PostMedia:
+    media = PostMedia(
+        post_id=post.id,
+        source_bot_chat_id=post.created_by_telegram_id or 111,
+        source_bot_message_id=source_bot_message_id,
+        media_group_id=None,
+        media_type=media_type,
+        file_id=file_id or f"{media_type}-file-id-{source_bot_message_id}",
+        file_unique_id=f"{media_type}-unique-{source_bot_message_id}",
+        order_index=order_index,
+    )
+    db.add(media)
+    db.flush()
+    return media
 
 
 def make_job(

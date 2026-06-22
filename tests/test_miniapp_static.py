@@ -43,6 +43,30 @@ def test_miniapp_form_submit_keeps_form_reference_across_async_boundaries() -> N
     assert "event.currentTarget.reset" not in js
 
 
+def test_miniapp_uses_telegram_drafts_instead_of_free_text_composer() -> None:
+    html = read("index.html")
+    js = read("app.js")
+
+    assert 'id="draft-picker"' in html
+    assert 'id="open-bot"' in html
+    assert 'id="refresh-drafts"' in html
+    assert 'textarea name="body"' not in html
+    assert "selectedDraftId" in js
+    assert 'api(`posts/${draftId}/schedule`' in js
+    assert "Отправьте пост боту" in js
+
+
+def test_miniapp_auto_syncs_groups_and_can_logout_account() -> None:
+    html = read("index.html")
+    js = read("app.js")
+
+    assert 'id="logout-account"' in html
+    assert "account/logout" in js
+    assert "autoSyncGroups" in js
+    assert "groupsSyncedOnInit" in js
+    assert "syncGroups({ silent: true })" in js
+
+
 def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     html = read("index.html")
     js = read("app.js")

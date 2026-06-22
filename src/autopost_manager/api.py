@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
+
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -23,11 +25,15 @@ from autopost_manager.models import (
 from autopost_manager.schemas import (
     AccountCodeConfirm,
     AccountLoginOut,
+    AccountLogoutOut,
     AccountPasswordConfirm,
     AccountStartLogin,
+    AppConfigOut,
     JobOut,
     PostCreate,
+    PostMediaOut,
     PostOut,
+    PostScheduleUpdate,
     TargetChatCreate,
     TargetChatOut,
     TelegramSessionOut,
@@ -54,6 +60,81 @@ if miniapp_dir.exists():
     app.mount("/miniapp", StaticFiles(directory=miniapp_dir, html=True), name="miniapp")
 
 
+def post_to_out(post: Post) -> PostOut:
+    return PostOut(
+        id=post.id,
+        title=post.title,
+        body=post.body,
+        parse_mode=post.parse_mode,
+        status=post.status,
+        schedule_kind=post.schedule_kind,
+        next_run_at=post.next_run_at,
+        interval_minutes=post.interval_minutes,
+        timezone=post.timezone,
+        session_strategy=post.session_strategy,
+        default_session_id=post.default_session_id,
+        target_chat_ids=[target.target_chat_id for target in post.targets],
+        media=[
+            PostMediaOut.model_validate(media)
+            for media in sorted(post.media_items, key=lambda item: item.order_index)
+        ],
+    )
+
+
+def validate_post_schedule(
+    *,
+    schedule_kind: ScheduleKind,
+    interval_minutes: int | None,
+    spam_risk_acknowledged: bool,
+    default_session_id: uuid.UUID | None,
+    target_chat_ids: list[uuid.UUID],
+) -> None:
+    if schedule_kind == ScheduleKind.interval:
+        if interval_minutes is None:
+            raise HTTPException(status_code=422, detail="Укажите интервал повтора")
+        if interval_minutes < 20:
+            raise HTTPException(status_code=422, detail="Минимальный интервал повтора — 20 минут")
+        if interval_minutes <= 30 and not spam_risk_acknowledged:
+            raise HTTPException(
+                status_code=422,
+                detail="Подтвердите риск: за частую отправку сообщений Telegram может ограничить аккаунт",
+            )
+
+    if not default_session_id:
+        raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
+    if not target_chat_ids:
+        raise HTTPException(status_code=422, detail="Выберите хотя бы одну группу")
+
+
+def validate_owned_session_and_targets(
+    *,
+    telegram_user_id: int,
+    session_id: uuid.UUID | None,
+    target_chat_ids: list[uuid.UUID],
+    db: Session,
+) -> None:
+    if session_id:
+        session = db.get(TelegramSession, session_id)
+        if not session or session.owner_telegram_id != telegram_user_id:
+            raise HTTPException(status_code=404, detail="Telegram account not found")
+
+    for target_chat_id in target_chat_ids:
+        target = db.get(TargetChat, target_chat_id)
+        if not target or target.owner_telegram_id != telegram_user_id or not target.enabled:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+
+def delete_session_files(session_path: str | None) -> None:
+    if not session_path:
+        return
+    path = Path(session_path)
+    for candidate in {path, path.with_suffix(".session"), path.with_suffix(".session-journal")}:
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 @app.get("/health")
 def health() -> dict[str, object]:
     return {"ok": True, "env": get_settings().app_env}
@@ -62,6 +143,11 @@ def health() -> dict[str, object]:
 @app.get("/api/health")
 def api_health() -> dict[str, object]:
     return health()
+
+
+@app.get("/api/app-config", response_model=AppConfigOut)
+def app_config() -> AppConfigOut:
+    return AppConfigOut(bot_username=get_settings().bot_username)
 
 
 @app.get("/api/sessions", response_model=list[TelegramSessionOut])
@@ -182,6 +268,38 @@ async def confirm_account_password(
     return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
+@app.post("/api/account/logout", response_model=AccountLogoutOut)
+def logout_account(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountLogoutOut:
+    sessions = list(
+        db.scalars(
+            select(TelegramSession)
+            .where(TelegramSession.owner_telegram_id == telegram_user_id)
+            .where(TelegramSession.status != SessionStatus.revoked)
+        )
+    )
+    chats = list(
+        db.scalars(
+            select(TargetChat)
+            .where(TargetChat.owner_telegram_id == telegram_user_id)
+            .where(TargetChat.enabled.is_(True))
+        )
+    )
+
+    for session in sessions:
+        session.status = SessionStatus.revoked
+        session.phone_code_hash = None
+        delete_session_files(session.session_path)
+
+    for chat in chats:
+        chat.enabled = False
+
+    db.commit()
+    return AccountLogoutOut(revoked_sessions=len(sessions), disabled_chats=len(chats))
+
+
 @app.post("/api/sessions/{session_id}/sync-chats")
 async def sync_session_chats(
     session_id: uuid.UUID,
@@ -209,6 +327,7 @@ async def sync_session_chats(
             existing.title = str(dialog["title"])
             existing.username = dialog["username"] if dialog["username"] else None
             existing.type = chat_type
+            existing.enabled = True
         else:
             db.add(
                 TargetChat(
@@ -235,6 +354,7 @@ def list_chats(
         db.scalars(
             select(TargetChat)
             .where(TargetChat.owner_telegram_id == telegram_user_id)
+            .where(TargetChat.enabled.is_(True))
             .order_by(TargetChat.title)
         )
     )
@@ -281,23 +401,7 @@ def list_posts(
         .unique()
         .all()
     )
-    return [
-        PostOut(
-            id=post.id,
-            title=post.title,
-            body=post.body,
-            parse_mode=post.parse_mode,
-            status=post.status,
-            schedule_kind=post.schedule_kind,
-            next_run_at=post.next_run_at,
-            interval_minutes=post.interval_minutes,
-            timezone=post.timezone,
-            session_strategy=post.session_strategy,
-            default_session_id=post.default_session_id,
-            target_chat_ids=[target.target_chat_id for target in post.targets],
-        )
-        for post in posts
-    ]
+    return [post_to_out(post) for post in posts]
 
 
 @app.post("/api/posts", response_model=PostOut)
@@ -306,32 +410,21 @@ def create_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    if payload.schedule_kind == ScheduleKind.interval:
-        if payload.interval_minutes is None:
-            raise HTTPException(status_code=422, detail="Укажите интервал повтора")
-        if payload.interval_minutes < 20:
-            raise HTTPException(status_code=422, detail="Минимальный интервал повтора — 20 минут")
-        if payload.interval_minutes <= 30 and not payload.spam_risk_acknowledged:
-            raise HTTPException(
-                status_code=422,
-                detail="Подтвердите риск: за частую отправку сообщений Telegram может ограничить аккаунт",
-            )
-
     if payload.status == PostStatus.scheduled:
-        if not payload.default_session_id:
-            raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
-        if not payload.target_chat_ids:
-            raise HTTPException(status_code=422, detail="Выберите хотя бы одну группу")
+        validate_post_schedule(
+            schedule_kind=payload.schedule_kind,
+            interval_minutes=payload.interval_minutes,
+            spam_risk_acknowledged=payload.spam_risk_acknowledged,
+            default_session_id=payload.default_session_id,
+            target_chat_ids=payload.target_chat_ids,
+        )
 
-    if payload.default_session_id:
-        session = db.get(TelegramSession, payload.default_session_id)
-        if not session or session.owner_telegram_id != telegram_user_id:
-            raise HTTPException(status_code=404, detail="Telegram account not found")
-
-    for target_chat_id in payload.target_chat_ids:
-        target = db.get(TargetChat, target_chat_id)
-        if not target or target.owner_telegram_id != telegram_user_id:
-            raise HTTPException(status_code=404, detail="Group not found")
+    validate_owned_session_and_targets(
+        telegram_user_id=telegram_user_id,
+        session_id=payload.default_session_id,
+        target_chat_ids=payload.target_chat_ids,
+        db=db,
+    )
 
     post_data = payload.model_dump(exclude={"target_chat_ids", "spam_risk_acknowledged"})
     post = Post(**post_data, created_by_telegram_id=telegram_user_id)
@@ -341,20 +434,47 @@ def create_post(
         db.add(PostTarget(post_id=post.id, target_chat_id=target_chat_id))
     db.commit()
     db.refresh(post)
-    return PostOut(
-        id=post.id,
-        title=post.title,
-        body=post.body,
-        parse_mode=post.parse_mode,
-        status=post.status,
-        schedule_kind=post.schedule_kind,
-        next_run_at=post.next_run_at,
-        interval_minutes=post.interval_minutes,
-        timezone=post.timezone,
-        session_strategy=post.session_strategy,
-        default_session_id=post.default_session_id,
+    return post_to_out(post)
+
+
+@app.post("/api/posts/{post_id}/schedule", response_model=PostOut)
+def schedule_post(
+    post_id: uuid.UUID,
+    payload: PostScheduleUpdate,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> PostOut:
+    post = db.get(Post, post_id)
+    if not post or post.created_by_telegram_id != telegram_user_id:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    validate_post_schedule(
+        schedule_kind=payload.schedule_kind,
+        interval_minutes=payload.interval_minutes,
+        spam_risk_acknowledged=payload.spam_risk_acknowledged,
+        default_session_id=payload.default_session_id,
         target_chat_ids=payload.target_chat_ids,
     )
+    validate_owned_session_and_targets(
+        telegram_user_id=telegram_user_id,
+        session_id=payload.default_session_id,
+        target_chat_ids=payload.target_chat_ids,
+        db=db,
+    )
+
+    post.status = PostStatus.scheduled
+    post.schedule_kind = payload.schedule_kind
+    post.next_run_at = payload.next_run_at
+    post.interval_minutes = payload.interval_minutes
+    post.timezone = payload.timezone
+    post.default_session_id = payload.default_session_id
+    post.targets.clear()
+    db.flush()
+    for target_chat_id in payload.target_chat_ids:
+        db.add(PostTarget(post_id=post.id, target_chat_id=target_chat_id))
+    db.commit()
+    db.refresh(post)
+    return post_to_out(post)
 
 
 @app.post("/api/posts/{post_id}/enqueue-now")

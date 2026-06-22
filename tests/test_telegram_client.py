@@ -10,7 +10,7 @@ from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from autopost_manager import telegram_client
 from autopost_manager.models import SessionStatus
 
-from conftest import make_session
+from conftest import make_media, make_post, make_session
 
 
 class FakeMessage:
@@ -22,6 +22,7 @@ class AuthorizedClient:
         self.connected = False
         self.disconnected = False
         self.sent: list[tuple[int, str, str | None]] = []
+        self.files: list[tuple[int, object, str | None, str | None]] = []
 
     async def connect(self) -> None:
         self.connected = True
@@ -34,6 +35,16 @@ class AuthorizedClient:
 
     async def send_message(self, chat_id: int, text: str, parse_mode: str | None = None):
         self.sent.append((chat_id, text, parse_mode))
+        return FakeMessage()
+
+    async def send_file(
+        self,
+        chat_id: int,
+        file,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+    ):
+        self.files.append((chat_id, file, caption, parse_mode))
         return FakeMessage()
 
 
@@ -144,6 +155,107 @@ def test_send_message_marks_session_as_needing_login_when_unauthorized(
 
     assert fake_client.disconnected is True
     assert session.status == SessionStatus.needs_login
+
+
+def test_send_post_from_session_sends_media_with_caption(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    post = make_post(db_session, owner_id=111, session=session, chats=[], body="<b>caption</b>")
+    make_media(db_session, post, media_type="photo", file_id="photo-file-id")
+    db_session.commit()
+    fake_client = AuthorizedClient()
+
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    message_id = asyncio.run(
+        telegram_client.send_post_from_session(
+            db=db_session,
+            session=session,
+            chat_id=-1001,
+            post=post,
+        )
+    )
+
+    assert message_id == 999
+    assert fake_client.files == [(-1001, "photo-file-id", "<b>caption</b>", "html")]
+    assert fake_client.sent == []
+
+
+def test_send_post_from_session_sends_album_and_long_text_separately(
+    monkeypatch,
+    db_session,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    post = make_post(db_session, owner_id=111, session=session, chats=[], body="x" * 1100)
+    make_media(db_session, post, media_type="photo", file_id="first", source_bot_message_id=1)
+    make_media(
+        db_session,
+        post,
+        media_type="photo",
+        file_id="second",
+        source_bot_message_id=2,
+        order_index=1,
+    )
+    db_session.commit()
+    fake_client = AuthorizedClient()
+
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    message_id = asyncio.run(
+        telegram_client.send_post_from_session(
+            db=db_session,
+            session=session,
+            chat_id=-1001,
+            post=post,
+        )
+    )
+
+    assert message_id == 999
+    assert fake_client.files == [(-1001, ["first", "second"], None, "html")]
+    assert fake_client.sent == [(-1001, "x" * 1100, "html")]
+
+
+def test_send_media_from_session_downloads_temp_files_when_file_id_send_fails(
+    monkeypatch,
+    db_session,
+    tmp_path,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    post = make_post(db_session, owner_id=111, session=session, chats=[], body="caption")
+    media = make_media(db_session, post, media_type="photo", file_id="bad-file-id")
+    db_session.commit()
+    temp_file = tmp_path / "downloaded.jpg"
+    temp_file.write_bytes(b"image")
+
+    class FallbackClient(AuthorizedClient):
+        async def send_file(self, chat_id, file, caption=None, parse_mode=None):
+            self.files.append((chat_id, file, caption, parse_mode))
+            if file == "bad-file-id":
+                raise RuntimeError("file id rejected")
+            return FakeMessage()
+
+    fake_client = FallbackClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    async def fake_download_bot_file(*_args):
+        return str(temp_file)
+
+    monkeypatch.setattr(telegram_client, "download_bot_file", fake_download_bot_file)
+
+    message_id = asyncio.run(
+        telegram_client.send_media_from_session(
+            db=db_session,
+            session=session,
+            chat_id=-1001,
+            media_items=[media],
+            text="caption",
+            parse_mode="html",
+        )
+    )
+
+    assert message_id == 999
+    assert fake_client.files[0] == (-1001, "bad-file-id", "caption", "html")
+    assert fake_client.files[1] == (-1001, str(temp_file), "caption", "html")
+    assert not temp_file.exists()
 
 
 def test_classify_send_error_marks_flood_wait_session_limited(db_session) -> None:

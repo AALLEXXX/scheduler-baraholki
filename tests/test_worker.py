@@ -7,7 +7,7 @@ from autopost_manager import worker
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import JobStatus, PublishJob, SessionStatus
 
-from conftest import make_chat, make_job, make_post, make_session
+from conftest import make_chat, make_job, make_media, make_post, make_session
 
 
 def test_choose_session_prefers_explicit_active_job_session(db_session) -> None:
@@ -55,13 +55,13 @@ def test_process_one_job_success_marks_done(monkeypatch, db_session) -> None:
     job = make_job(db_session, post, chat, session=session)
     db_session.commit()
 
-    async def fake_send_message_from_session(db, session, chat_id, text, parse_mode):
+    async def fake_send_post_from_session(db, session, chat_id, post):
         assert chat_id == -1001
-        assert text == "hello"
-        assert parse_mode == "html"
+        assert post.body == "hello"
+        assert post.parse_mode == "html"
         return 555
 
-    monkeypatch.setattr(worker, "send_message_from_session", fake_send_message_from_session)
+    monkeypatch.setattr(worker, "send_post_from_session", fake_send_post_from_session)
 
     processed = asyncio.run(worker.process_one_job())
 
@@ -98,10 +98,10 @@ def test_process_one_job_records_send_error(monkeypatch, db_session) -> None:
     job = make_job(db_session, post, chat, session=session)
     db_session.commit()
 
-    async def failing_send_message_from_session(*_args, **_kwargs):
+    async def failing_send_post_from_session(*_args, **_kwargs):
         raise RuntimeError("telegram exploded")
 
-    monkeypatch.setattr(worker, "send_message_from_session", failing_send_message_from_session)
+    monkeypatch.setattr(worker, "send_post_from_session", failing_send_post_from_session)
 
     processed = asyncio.run(worker.process_one_job())
 
@@ -115,3 +115,27 @@ def test_process_one_job_records_send_error(monkeypatch, db_session) -> None:
 
 def test_process_one_job_returns_false_when_queue_is_empty() -> None:
     assert asyncio.run(worker.process_one_job()) is False
+
+
+def test_process_one_job_passes_media_post_to_sender(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session, telegram_chat_id=-1001)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat], body="caption")
+    make_media(db_session, post, media_type="photo", file_id="photo-id")
+    job = make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    async def fake_send_post_from_session(db, session, chat_id, post):
+        assert chat_id == -1001
+        assert post.media_items[0].file_id == "photo-id"
+        return 777
+
+    monkeypatch.setattr(worker, "send_post_from_session", fake_send_post_from_session)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    with SessionLocal() as db:
+        refreshed = db.get(PublishJob, job.id)
+        assert refreshed.status == JobStatus.done
+        assert refreshed.telegram_message_id == 777

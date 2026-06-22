@@ -101,6 +101,12 @@ button:disabled {
   opacity: 0.48;
 }
 
+.secondary-button {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  color: var(--text);
+}
+
 .icon-button {
   width: 46px;
   padding: 0;
@@ -170,6 +176,13 @@ button:disabled {
   font-weight: 650;
 }
 
+.status-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .panel {
   padding: 16px;
 }
@@ -200,6 +213,12 @@ button:disabled {
 .stack {
   display: grid;
   gap: 12px;
+}
+
+.telegram-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
 }
 
 .form-grid {
@@ -254,6 +273,39 @@ textarea {
 
 .search-input {
   margin-bottom: 10px;
+}
+
+.draft-list {
+  display: grid;
+  gap: 8px;
+}
+
+.draft-card {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+  color: var(--text);
+  text-align: left;
+}
+
+.draft-card.selected {
+  border-color: color-mix(in srgb, var(--brand) 80%, white);
+  box-shadow: 0 0 0 3px rgba(36, 129, 204, 0.16);
+}
+
+.draft-card strong {
+  font-size: 15px;
+}
+
+.draft-card span,
+.draft-card small {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .chip-grid {
@@ -340,7 +392,8 @@ textarea {
   }
 
   .form-grid,
-  .panel-heading {
+  .panel-heading,
+  .telegram-compose {
     grid-template-columns: 1fr;
     display: grid;
   }

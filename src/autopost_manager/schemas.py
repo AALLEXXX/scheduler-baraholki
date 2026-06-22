@@ -20,6 +20,10 @@ class TelegramSessionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AppConfigOut(BaseModel):
+    bot_username: str
+
+
 class AccountStartLogin(BaseModel):
     api_id: int = Field(gt=0)
     api_hash: str = Field(min_length=16, max_length=160)
@@ -72,9 +76,34 @@ class PostCreate(BaseModel):
     spam_risk_acknowledged: bool = False
 
 
+class PostScheduleUpdate(BaseModel):
+    schedule_kind: ScheduleKind = ScheduleKind.once
+    next_run_at: datetime | None = None
+    interval_minutes: int | None = Field(default=None, ge=1)
+    timezone: str = "Asia/Tbilisi"
+    default_session_id: uuid.UUID
+    target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
+    spam_risk_acknowledged: bool = False
+
+
 class ChatSyncResult(BaseModel):
     imported: int
     total_dialogs: int
+
+
+class AccountLogoutOut(BaseModel):
+    revoked_sessions: int
+    disabled_chats: int
+
+
+class PostMediaOut(BaseModel):
+    id: uuid.UUID
+    media_type: str
+    file_id: str
+    file_unique_id: str | None
+    order_index: int
+
+    model_config = {"from_attributes": True}
 
 
 class PostOut(BaseModel):
@@ -90,6 +119,7 @@ class PostOut(BaseModel):
     session_strategy: str
     default_session_id: uuid.UUID | None
     target_chat_ids: list[uuid.UUID]
+    media: list[PostMediaOut] = Field(default_factory=list)
 
 
 class JobOut(BaseModel):

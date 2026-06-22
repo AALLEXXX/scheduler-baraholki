@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
+import aiohttp
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 
 from autopost_manager.config import get_settings
-from autopost_manager.models import SessionStatus, TelegramSession
+from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -58,6 +61,150 @@ async def send_message_from_session(
         session.status = SessionStatus.active
         db.commit()
         return int(message.id)
+
+
+async def send_post_from_session(
+    db: Session,
+    session: TelegramSession,
+    chat_id: int,
+    post: Post,
+) -> int:
+    media_items = sorted(post.media_items, key=lambda item: item.order_index)
+    if not media_items:
+        return await send_message_from_session(
+            db=db,
+            session=session,
+            chat_id=chat_id,
+            text=post.body,
+            parse_mode=post.parse_mode,
+        )
+
+    return await send_media_from_session(
+        db=db,
+        session=session,
+        chat_id=chat_id,
+        media_items=media_items,
+        text=post.body,
+        parse_mode=post.parse_mode,
+    )
+
+
+async def send_media_from_session(
+    db: Session,
+    session: TelegramSession,
+    chat_id: int,
+    media_items: list[PostMedia],
+    text: str,
+    parse_mode: str | None,
+) -> int:
+    lock = _lock_for(session.session_path)
+
+    async with lock:
+        now = datetime.now(UTC)
+        if session.last_send_at:
+            elapsed = (now - session.last_send_at).total_seconds()
+            wait_seconds = max(0, session.min_send_interval_seconds - elapsed)
+            if wait_seconds:
+                await asyncio.sleep(wait_seconds)
+
+        client = build_client(session)
+        await client.connect()
+        temp_files: list[str] = []
+        try:
+            if not await client.is_user_authorized():
+                session.status = SessionStatus.needs_login
+                db.commit()
+                raise RuntimeError("Telegram session needs login")
+
+            files = [media.file_id for media in media_items]
+            try:
+                sent = await send_files_with_optional_text(
+                    client=client,
+                    chat_id=chat_id,
+                    files=files,
+                    text=text,
+                    parse_mode=parse_mode,
+                )
+            except Exception:
+                temp_files = [
+                    await download_bot_file(media.file_id, media.media_type)
+                    for media in media_items
+                ]
+                sent = await send_files_with_optional_text(
+                    client=client,
+                    chat_id=chat_id,
+                    files=temp_files,
+                    text=text,
+                    parse_mode=parse_mode,
+                )
+        finally:
+            for temp_file in temp_files:
+                Path(temp_file).unlink(missing_ok=True)
+            await client.disconnect()
+
+        session.last_send_at = datetime.now(UTC)
+        session.status = SessionStatus.active
+        db.commit()
+        return extract_sent_message_id(sent)
+
+
+async def send_files_with_optional_text(
+    *,
+    client: TelegramClient,
+    chat_id: int,
+    files: list[str],
+    text: str,
+    parse_mode: str | None,
+):
+    caption = text if text and len(text) <= 1024 else None
+    sent = await client.send_file(
+        chat_id,
+        files[0] if len(files) == 1 else files,
+        caption=caption,
+        parse_mode=parse_mode,
+    )
+    if text and not caption:
+        text_message = await client.send_message(chat_id, text, parse_mode=parse_mode)
+        return text_message
+    return sent
+
+
+def extract_sent_message_id(sent) -> int:
+    if isinstance(sent, list):
+        return int(sent[-1].id)
+    return int(sent.id)
+
+
+async def download_bot_file(file_id: str, media_type: str) -> str:
+    settings = get_settings()
+    suffix_by_type = {
+        "photo": ".jpg",
+        "video": ".mp4",
+        "animation": ".mp4",
+        "document": "",
+    }
+    async with aiohttp.ClientSession() as http:
+        async with http.get(
+            f"https://api.telegram.org/bot{settings.bot_token}/getFile",
+            params={"file_id": file_id},
+        ) as response:
+            payload = await response.json()
+            if not payload.get("ok"):
+                raise RuntimeError(f"Could not resolve Telegram file: {payload}")
+            file_path = payload["result"]["file_path"]
+
+        suffix = Path(file_path).suffix or suffix_by_type.get(media_type, "")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
+            temp_path = temp.name
+
+        async with http.get(
+            f"https://api.telegram.org/file/bot{settings.bot_token}/{file_path}"
+        ) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"Could not download Telegram file: HTTP {response.status}")
+            Path(temp_path).write_bytes(await response.read())
+
+    return temp_path
 
 
 def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     app_secret: str = Field(min_length=16)
 
     bot_token: str = Field(min_length=20)
+    bot_username: str = "scheduler_baraholki_bot"
     admin_telegram_ids: str = ""
 
     telegram_api_id: int

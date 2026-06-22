@@ -8,18 +8,29 @@ if (tg) {
 }
 
 const state = {
+  config: { bot_username: "scheduler_baraholki_bot" },
   sessions: [],
   chats: [],
   posts: [],
   pendingSessionId: null,
+  selectedDraftId: null,
   selectedChatIds: new Set(),
   groupSearch: "",
   groupPage: 1,
   groupPageSize: 10,
+  groupsSyncedOnInit: false,
 };
 
 function activeSessions() {
   return state.sessions.filter((session) => session.status === "active");
+}
+
+function draftPosts() {
+  return state.posts.filter((post) => post.status === "draft");
+}
+
+function queuePosts() {
+  return state.posts.filter((post) => post.status !== "draft");
 }
 
 function notify(message, type = "info") {
@@ -127,8 +138,11 @@ function render() {
   const primarySession = connected[0] || state.sessions[0];
   const hasAccount = connected.length > 0;
   const hasGroups = state.chats.length > 0;
+  const drafts = draftPosts();
+  const queued = queuePosts();
 
-  document.querySelector("#posts-count").textContent = `${state.posts.length} постов`;
+  document.querySelector("#posts-count").textContent = `${queued.length} постов`;
+  document.querySelector("#drafts-count").textContent = `${drafts.length} постов`;
   document.querySelector("#groups-count").textContent = `${state.chats.length} групп`;
 
   const stateDot = document.querySelector("#account-state");
@@ -140,10 +154,11 @@ function render() {
 
   document.querySelector("#connect-panel").hidden = hasAccount;
   document.querySelector("#sync-groups").hidden = !hasAccount;
+  document.querySelector("#logout-account").hidden = !hasAccount;
   document.querySelector("#compose-hint").textContent = hasAccount
     ? hasGroups
-      ? "Заполните текст, время и выберите группы."
-      : "Нажмите «Обновить группы», чтобы подтянуть группы аккаунта."
+      ? "Выберите черновик, время и группы."
+      : "Группы обновятся автоматически. Можно обновить вручную."
     : "Сначала подключите аккаунт.";
 
   const picker = document.querySelector("#group-picker");
@@ -154,14 +169,49 @@ function render() {
   }
 
   const saveButton = document.querySelector("#save-post");
-  saveButton.disabled = !hasAccount || !hasGroups;
+  saveButton.disabled = !hasAccount || !hasGroups || !state.selectedDraftId;
+
+  renderDraftPicker();
 
   const posts = document.querySelector("#posts");
-  if (state.posts.length === 0) {
+  if (queued.length === 0) {
     posts.replaceChildren(emptyPost("Постов пока нет"));
   } else {
-    posts.replaceChildren(...state.posts.map(renderPost));
+    posts.replaceChildren(...queued.map(renderPost));
   }
+}
+
+function renderDraftPicker() {
+  const picker = document.querySelector("#draft-picker");
+  const drafts = draftPosts();
+  if (!drafts.some((post) => post.id === state.selectedDraftId)) {
+    state.selectedDraftId = drafts[0]?.id || null;
+  }
+
+  if (drafts.length === 0) {
+    picker.replaceChildren(emptyPost("Черновиков пока нет"));
+    return;
+  }
+
+  picker.replaceChildren(
+    ...drafts.map((post) => {
+      const card = document.createElement("button");
+      card.className = `draft-card ${state.selectedDraftId === post.id ? "selected" : ""}`.trim();
+      card.type = "button";
+      card.addEventListener("click", () => {
+        state.selectedDraftId = post.id;
+        render();
+      });
+
+      const mediaCount = post.media?.length || 0;
+      const preview = post.body ? stripHtml(post.body).slice(0, 180) : "Медиа без текста";
+      card.innerHTML = `<strong></strong><span></span><small></small>`;
+      card.querySelector("strong").textContent = post.title || "Пост из Telegram";
+      card.querySelector("span").textContent = preview;
+      card.querySelector("small").textContent = mediaCount ? `${mediaCount} медиа` : "Текст";
+      return card;
+    }),
+  );
 }
 
 function renderGroupPicker() {
@@ -218,43 +268,58 @@ function emptyPost(text) {
 function renderPost(post) {
   const node = document.createElement("article");
   node.className = "post-item";
-  const preview = post.body.length > 120 ? `${post.body.slice(0, 120)}...` : post.body;
+  const cleanBody = stripHtml(post.body || "");
+  const preview = cleanBody.length > 120 ? `${cleanBody.slice(0, 120)}...` : cleanBody || "Медиа без текста";
   const when = post.next_run_at ? new Date(post.next_run_at).toLocaleString() : "без даты";
+  const media = post.media?.length ? ` · ${post.media.length} медиа` : "";
   node.innerHTML = `<p></p><span></span>`;
   node.querySelector("p").textContent = preview;
-  node.querySelector("span").textContent = `${post.status} · ${when}`;
+  node.querySelector("span").textContent = `${post.status} · ${when}${media}`;
   return node;
 }
 
-async function load() {
-  const [sessions, chats, posts] = await Promise.all([
+function stripHtml(value) {
+  const node = document.createElement("div");
+  node.innerHTML = value || "";
+  return node.textContent || node.innerText || "";
+}
+
+async function load(options = {}) {
+  const [config, sessions, chats, posts] = await Promise.all([
+    api("app-config"),
     api("sessions"),
     api("chats"),
     api("posts"),
   ]);
+  state.config = config;
   state.sessions = sessions;
   state.chats = chats;
   state.posts = posts;
   const availableIds = new Set(chats.map((chat) => chat.id));
   state.selectedChatIds = new Set([...state.selectedChatIds].filter((id) => availableIds.has(id)));
   render();
+
+  if (options.autoSyncGroups && activeSessions().length > 0 && !state.groupsSyncedOnInit) {
+    state.groupsSyncedOnInit = true;
+    await syncGroups({ silent: true });
+  }
 }
 
-async function syncGroups() {
+async function syncGroups(options = {}) {
   const session = activeSessions()[0];
   if (!session) {
     notify("Сначала подключите аккаунт.", "error");
     return;
   }
   const button = document.querySelector("#sync-groups");
-  clearNotice();
+  if (!options.silent) clearNotice();
   setBusy(button, true, "Обновляем...");
   try {
     const result = await api(`sessions/${session.id}/sync-chats`, { method: "POST" });
-    notify(`Группы обновлены: ${result.total_dialogs}`);
+    if (!options.silent) notify(`Группы обновлены: ${result.total_dialogs}`);
     await load();
   } catch (error) {
-    notify(error.message, "error");
+    if (!options.silent) notify(error.message, "error");
   } finally {
     setBusy(button, false, "Обновить группы");
   }
@@ -262,10 +327,45 @@ async function syncGroups() {
 
 document.querySelector("#refresh").addEventListener("click", () => {
   clearNotice();
-  load().catch((error) => notify(error.message, "error"));
+  load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#sync-groups").addEventListener("click", syncGroups);
+
+document.querySelector("#logout-account").addEventListener("click", async () => {
+  clearNotice();
+  const confirmed = window.confirm("Выйти из подключенного Telegram-аккаунта?");
+  if (!confirmed) return;
+  const button = document.querySelector("#logout-account");
+  setBusy(button, true, "Выходим...");
+  try {
+    await api("account/logout", { method: "POST" });
+    state.selectedDraftId = null;
+    state.selectedChatIds.clear();
+    state.groupsSyncedOnInit = false;
+    notify("Аккаунт отключен.");
+    await load();
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    setBusy(button, false, "Выйти");
+  }
+});
+
+document.querySelector("#open-bot").addEventListener("click", () => {
+  const username = state.config.bot_username || "scheduler_baraholki_bot";
+  const url = `https://t.me/${username}`;
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(url);
+  } else {
+    window.open(url, "_blank");
+  }
+});
+
+document.querySelector("#refresh-drafts").addEventListener("click", () => {
+  clearNotice();
+  load().catch((error) => notify(error.message, "error"));
+});
 
 document.querySelector("select[name=schedule_kind]").addEventListener("change", (event) => {
   document.querySelector("#interval-row").hidden = event.target.value !== "interval";
@@ -339,6 +439,7 @@ document.querySelector("#code-form").addEventListener("submit", async (event) =>
 
     notify("Аккаунт подключен.");
     await load();
+    state.groupsSyncedOnInit = true;
     await syncGroups();
   } catch (error) {
     notify(error.message, "error");
@@ -364,6 +465,7 @@ document.querySelector("#password-form").addEventListener("submit", async (event
     });
     notify("Аккаунт подключен.");
     await load();
+    state.groupsSyncedOnInit = true;
     await syncGroups();
   } catch (error) {
     notify(error.message, "error");
@@ -382,9 +484,14 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   const sessionId = connected[0]?.id;
   const scheduleKind = form.get("schedule_kind");
   const nextRun = form.get("next_run_at");
+  const draftId = state.selectedDraftId;
 
   if (!sessionId) {
     notify("Подключите аккаунт.", "error");
+    return;
+  }
+  if (!draftId) {
+    notify("Отправьте пост боту и выберите черновик.", "error");
     return;
   }
   if (checkedGroups.length === 0) {
@@ -392,13 +499,6 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
     return;
   }
 
-  const body = String(form.get("body") || "").trim();
-  if (!body) {
-    notify("Напишите текст поста.", "error");
-    return;
-  }
-
-  const title = body.slice(0, 60) || "Пост";
   const intervalMinutes = scheduleKind === "interval" ? Number(form.get("interval_minutes")) : null;
 
   if (scheduleKind === "interval") {
@@ -410,12 +510,9 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   setBusy(button, true, "Сохраняем...");
 
   try {
-    await api("posts", {
+    await api(`posts/${draftId}/schedule`, {
       method: "POST",
       body: JSON.stringify({
-        title,
-        body,
-        status: "scheduled",
         schedule_kind: scheduleKind,
         next_run_at: new Date(nextRun).toISOString(),
         interval_minutes: intervalMinutes,
@@ -429,6 +526,7 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
     state.selectedChatIds.clear();
     state.groupSearch = "";
     state.groupPage = 1;
+    state.selectedDraftId = null;
     document.querySelector("#group-search").value = "";
     document.querySelector("#interval-row").hidden = true;
     notify("Пост запланирован.");
@@ -440,4 +538,4 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   }
 });
 
-load().catch((error) => notify(error.message, "error"));
+load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));

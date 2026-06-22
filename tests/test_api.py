@@ -7,7 +7,7 @@ from autopost_manager import api as api_module
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import Post, SessionStatus, TargetChat, TargetChatType
 
-from conftest import make_chat, make_post, make_session
+from conftest import make_chat, make_media, make_post, make_session
 
 
 def post_payload(session_id: str, chat_ids: list[str], **overrides):
@@ -37,6 +37,13 @@ def test_health_routes_are_public(client) -> None:
     assert client.get("/api/health").json()["ok"] is True
 
 
+def test_app_config_returns_bot_username(client) -> None:
+    response = client.get("/api/app-config")
+
+    assert response.status_code == 200
+    assert response.json()["bot_username"] == "scheduler_baraholki_bot"
+
+
 def test_create_once_post_returns_200_and_persists_targets(client, auth_user, db_session) -> None:
     auth_user(111)
     session = make_session(db_session, owner_id=111)
@@ -49,6 +56,7 @@ def test_create_once_post_returns_200_and_persists_targets(client, auth_user, db
     data = response.json()
     assert data["status"] == "scheduled"
     assert data["target_chat_ids"] == [str(chat.id)]
+    assert data["media"] == []
 
     with SessionLocal() as db:
         post = db.get(Post, uuid.UUID(data["id"]))
@@ -141,6 +149,30 @@ def test_list_endpoints_are_scoped_to_authenticated_user(client, auth_user, db_s
     assert [session["phone"] for session in sessions] == ["+111"]
     assert [chat["title"] for chat in chats] == ["Owner group"]
     assert [post["body"] for post in posts] == ["Owner post"]
+
+
+def test_list_posts_includes_telegram_media_for_drafts(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        status=api_module.PostStatus.draft,
+        body="<b>Draft</b>",
+    )
+    make_media(db_session, post, media_type="photo", file_id="photo-file-id")
+    db_session.commit()
+
+    auth_user(111)
+    response = client.get("/api/posts")
+
+    assert response.status_code == 200
+    [draft] = response.json()
+    assert draft["status"] == "draft"
+    assert draft["media"][0]["media_type"] == "photo"
+    assert draft["media"][0]["file_id"] == "photo-file-id"
 
 
 def test_start_login_creates_pending_session_without_real_telegram(
@@ -405,6 +437,31 @@ def test_sync_chats_imports_and_updates_owned_dialogs(client, auth_user, db_sess
         assert chats[1].username == "new"
 
 
+def test_logout_revokes_sessions_hides_chats_and_deletes_session_files(
+    client,
+    auth_user,
+    db_session,
+    tmp_path,
+) -> None:
+    session_file = tmp_path / "telegram.session"
+    session_file.write_text("secret", encoding="utf-8")
+    session = make_session(db_session, owner_id=111)
+    session.session_path = str(session_file)
+    make_chat(db_session, session, title="Visible group")
+    other_session = make_session(db_session, owner_id=222)
+    make_chat(db_session, other_session, title="Other group")
+    db_session.commit()
+
+    auth_user(111)
+    response = client.post("/api/account/logout")
+
+    assert response.status_code == 200
+    assert response.json() == {"revoked_sessions": 1, "disabled_chats": 1}
+    assert not session_file.exists()
+    assert client.get("/api/sessions").json()[0]["status"] == "revoked"
+    assert client.get("/api/chats").json() == []
+
+
 def test_sync_chats_rejects_foreign_session_and_telegram_runtime_error(
     client,
     auth_user,
@@ -501,6 +558,76 @@ def test_create_post_requires_interval_session_and_group(client, auth_user, db_s
     )
     assert missing_group.status_code == 422
     assert "Выберите хотя бы одну группу" in missing_group.text
+
+
+def test_schedule_existing_telegram_draft(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    draft = make_post(
+        db_session,
+        owner_id=111,
+        session=None,
+        chats=[],
+        status=api_module.PostStatus.draft,
+        body="<b>Telegram draft</b>",
+    )
+    make_media(db_session, draft, media_type="photo")
+    db_session.commit()
+    auth_user(111)
+
+    response = client.post(
+        f"/api/posts/{draft.id}/schedule",
+        json={
+            "schedule_kind": "once",
+            "next_run_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            "interval_minutes": None,
+            "default_session_id": str(session.id),
+            "target_chat_ids": [str(chat.id)],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "scheduled"
+    assert data["default_session_id"] == str(session.id)
+    assert data["target_chat_ids"] == [str(chat.id)]
+    assert data["media"][0]["media_type"] == "photo"
+
+
+def test_schedule_existing_post_rejects_foreign_or_disabled_targets(
+    client,
+    auth_user,
+    db_session,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    disabled_chat = make_chat(db_session, session, enabled=False)
+    foreign_session = make_session(db_session, owner_id=222)
+    foreign_chat = make_chat(db_session, foreign_session)
+    draft = make_post(db_session, owner_id=111, status=api_module.PostStatus.draft, chats=[])
+    db_session.commit()
+    auth_user(111)
+
+    disabled = client.post(
+        f"/api/posts/{draft.id}/schedule",
+        json={
+            "schedule_kind": "once",
+            "next_run_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            "default_session_id": str(session.id),
+            "target_chat_ids": [str(disabled_chat.id)],
+        },
+    )
+    assert disabled.status_code == 404
+
+    foreign = client.post(
+        f"/api/posts/{draft.id}/schedule",
+        json={
+            "schedule_kind": "once",
+            "next_run_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            "default_session_id": str(session.id),
+            "target_chat_ids": [str(foreign_chat.id)],
+        },
+    )
+    assert foreign.status_code == 404
 
 
 def test_enqueue_now_and_jobs_are_scoped_to_owner(client, auth_user, db_session) -> None:

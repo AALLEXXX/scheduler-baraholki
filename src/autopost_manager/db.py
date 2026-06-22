@@ -36,6 +36,7 @@ def ensure_runtime_columns() -> None:
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS api_hash VARCHAR(160)",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS phone_code_hash VARCHAR(300)",
         "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS owner_telegram_id BIGINT",
+        "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true",
         "CREATE INDEX IF NOT EXISTS ix_telegram_sessions_owner_telegram_id ON telegram_sessions (owner_telegram_id)",
         "CREATE INDEX IF NOT EXISTS ix_target_chats_owner_telegram_id ON target_chats (owner_telegram_id)",
     ]

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-1" />
+    <link rel="stylesheet" href="styles.css?v=20260623-2" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -25,7 +25,10 @@
           <p id="account-title">Проверяем аккаунт</p>
           <strong id="account-subtitle">...</strong>
         </div>
-        <button id="sync-groups" type="button" hidden>Обновить группы</button>
+        <div class="status-actions">
+          <button id="sync-groups" type="button" hidden>Обновить группы</button>
+          <button id="logout-account" class="secondary-button" type="button" hidden>Выйти</button>
+        </div>
       </section>
 
       <section id="connect-panel" class="panel accent-panel">
@@ -76,7 +79,18 @@
         </div>
 
         <form id="post-form" class="stack">
-          <textarea name="body" maxlength="4096" placeholder="Текст поста" required></textarea>
+          <div class="telegram-compose">
+            <button id="open-bot" type="button">Отправить пост боту</button>
+            <button id="refresh-drafts" class="secondary-button" type="button">Обновить посты</button>
+          </div>
+
+          <div>
+            <div class="section-row">
+              <span>Черновик</span>
+              <small id="drafts-count">0 постов</small>
+            </div>
+            <div id="draft-picker" class="draft-list"></div>
+          </div>
 
           <div class="form-grid">
             <label>
@@ -129,6 +143,6 @@
         <div id="posts" class="post-list"></div>
       </section>
     </main>
-    <script src="app.js?v=20260623-1"></script>
+    <script src="app.js?v=20260623-2"></script>
   </body>
 </html>

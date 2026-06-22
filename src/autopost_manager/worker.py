@@ -8,7 +8,7 @@ from sqlalchemy import select
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
 from autopost_manager.models import JobStatus, PublishJob, SessionStatus, TelegramSession
-from autopost_manager.telegram_client import classify_send_error, send_message_from_session
+from autopost_manager.telegram_client import classify_send_error, send_post_from_session
 
 
 def choose_session(db, job: PublishJob) -> TelegramSession | None:
@@ -53,12 +53,11 @@ async def process_one_job() -> bool:
             return True
 
         try:
-            message_id = await send_message_from_session(
+            message_id = await send_post_from_session(
                 db=db,
                 session=session,
                 chat_id=job.target_chat.telegram_chat_id,
-                text=job.post.body,
-                parse_mode=job.post.parse_mode,
+                post=job.post,
             )
         except Exception as exc:
             job.status = JobStatus.failed

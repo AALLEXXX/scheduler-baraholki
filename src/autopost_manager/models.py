@@ -122,6 +122,11 @@ class Post(Base):
     targets: Mapped[list["PostTarget"]] = relationship(
         back_populates="post", cascade="all, delete-orphan"
     )
+    media_items: Mapped[list["PostMedia"]] = relationship(
+        back_populates="post",
+        cascade="all, delete-orphan",
+        order_by="PostMedia.order_index",
+    )
 
 
 class PostTarget(Base):
@@ -134,6 +139,24 @@ class PostTarget(Base):
 
     post: Mapped[Post] = relationship(back_populates="targets")
     target_chat: Mapped[TargetChat] = relationship(back_populates="posts")
+
+
+class PostMedia(Base):
+    __tablename__ = "post_media"
+    __table_args__ = (UniqueConstraint("post_id", "source_bot_chat_id", "source_bot_message_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("posts.id"), index=True)
+    source_bot_chat_id: Mapped[int] = mapped_column(BigInteger)
+    source_bot_message_id: Mapped[int] = mapped_column(BigInteger)
+    media_group_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    media_type: Mapped[str] = mapped_column(String(40))
+    file_id: Mapped[str] = mapped_column(Text)
+    file_unique_id: Mapped[str | None] = mapped_column(String(200))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    post: Mapped[Post] = relationship(back_populates="media_items")
 
 
 class PublishJob(Base):
