@@ -24,6 +24,7 @@ class AuthorizedClient:
         self.disconnected = False
         self.sent: list[tuple[int, str, str | None]] = []
         self.files: list[tuple[int, object, str | None, str | None]] = []
+        self.forwarded: list[tuple[int, object, object, bool | None]] = []
         self.deleted: list[tuple[str, list[int], bool]] = []
         self.entity_requests: list[str] = []
 
@@ -49,6 +50,17 @@ class AuthorizedClient:
     ):
         self.files.append((chat_id, file, caption, parse_mode))
         return FakeMessage()
+
+    async def forward_messages(
+        self,
+        chat_id: int,
+        messages,
+        from_peer=None,
+        *,
+        drop_author: bool | None = None,
+    ):
+        self.forwarded.append((chat_id, messages, from_peer, drop_author))
+        return [FakeMessage()]
 
     async def delete_messages(self, peer: str, message_ids: list[int], revoke: bool = True):
         self.deleted.append((peer, message_ids, revoke))
@@ -194,6 +206,84 @@ def test_send_post_from_session_sends_media_with_caption(monkeypatch, db_session
     assert fake_client.sent == []
 
 
+def test_send_post_from_session_forwards_matching_long_album_from_bot_dialog(
+    monkeypatch,
+    db_session,
+) -> None:
+    created_at = datetime.now(UTC)
+    session = make_session(db_session, owner_id=111)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[],
+        body="x" * 1100,
+        next_run_at=created_at + timedelta(hours=1),
+    )
+    post.created_at = created_at
+    make_media(db_session, post, media_type="photo", file_id="first", source_bot_message_id=1)
+    make_media(
+        db_session,
+        post,
+        media_type="photo",
+        file_id="second",
+        source_bot_message_id=2,
+        order_index=1,
+    )
+    db_session.commit()
+
+    class BotDialogClient(AuthorizedClient):
+        async def iter_messages(self, _entity, limit: int):
+            yield SimpleNamespace(
+                id=12,
+                raw_text="x" * 1100,
+                message="x" * 1100,
+                media=object(),
+                grouped_id=777,
+                out=False,
+                date=created_at,
+            )
+            yield SimpleNamespace(
+                id=202,
+                raw_text="",
+                message="",
+                media=object(),
+                grouped_id=888,
+                out=True,
+                date=created_at,
+            )
+            yield SimpleNamespace(
+                id=201,
+                raw_text="x" * 1100,
+                message="x" * 1100,
+                media=object(),
+                grouped_id=888,
+                out=True,
+                date=created_at,
+            )
+
+    fake_client = BotDialogClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    message_id = asyncio.run(
+        telegram_client.send_post_from_session(
+            db=db_session,
+            session=session,
+            chat_id=-1001,
+            post=post,
+        )
+    )
+
+    assert message_id == 999
+    assert fake_client.entity_requests == [
+        "@scheduler_baraholki_bot",
+        "@scheduler_baraholki_bot",
+    ]
+    assert fake_client.forwarded == [(-1001, [201, 202], "entity:@scheduler_baraholki_bot", True)]
+    assert fake_client.files == []
+    assert fake_client.sent == []
+
+
 def test_send_post_from_session_sends_album_and_long_text_separately(
     monkeypatch,
     db_session,
@@ -225,6 +315,7 @@ def test_send_post_from_session_sends_album_and_long_text_separately(
 
     assert message_id == 999
     assert fake_client.files == [(-1001, ["first", "second"], None, "html")]
+    assert fake_client.forwarded == []
     assert fake_client.sent == [(-1001, "x" * 1100, "html")]
 
 

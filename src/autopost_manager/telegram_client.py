@@ -88,6 +88,7 @@ async def send_post_from_session(
         media_items=media_items,
         text=post.body,
         parse_mode=post.parse_mode,
+        source_created_at=post.created_at,
     )
 
 
@@ -98,6 +99,7 @@ async def send_media_from_session(
     media_items: list[PostMedia],
     text: str,
     parse_mode: str | None,
+    source_created_at: datetime | None = None,
 ) -> int:
     lock = _lock_for(session.session_path)
 
@@ -118,27 +120,48 @@ async def send_media_from_session(
                 db.commit()
                 raise RuntimeError("Telegram session needs login")
 
-            files = [media.file_id for media in media_items]
-            try:
-                sent = await send_files_with_optional_text(
+            source_message_ids = []
+            if len(text) > 1024:
+                source_message_ids = await find_forwardable_source_message_ids(
                     client=client,
-                    chat_id=chat_id,
-                    files=files,
                     text=text,
-                    parse_mode=parse_mode,
+                    media_count=len(media_items),
+                    created_at=source_created_at,
                 )
-            except Exception:
-                temp_files = [
-                    await download_bot_file(media.file_id, media.media_type)
-                    for media in media_items
-                ]
-                sent = await send_files_with_optional_text(
-                    client=client,
+
+            if source_message_ids:
+                bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
+                entity = await client.get_entity(bot_peer)
+                sent = await client.forward_messages(
                     chat_id=chat_id,
-                    files=temp_files,
-                    text=text,
-                    parse_mode=parse_mode,
+                    messages=source_message_ids[0]
+                    if len(source_message_ids) == 1
+                    else source_message_ids,
+                    from_peer=entity,
+                    drop_author=True,
                 )
+            else:
+                files = [media.file_id for media in media_items]
+                try:
+                    sent = await send_files_with_optional_text(
+                        client=client,
+                        chat_id=chat_id,
+                        files=files,
+                        text=text,
+                        parse_mode=parse_mode,
+                    )
+                except Exception:
+                    temp_files = [
+                        await download_bot_file(media.file_id, media.media_type)
+                        for media in media_items
+                    ]
+                    sent = await send_files_with_optional_text(
+                        client=client,
+                        chat_id=chat_id,
+                        files=temp_files,
+                        text=text,
+                        parse_mode=parse_mode,
+                    )
         finally:
             for temp_file in temp_files:
                 Path(temp_file).unlink(missing_ok=True)
@@ -148,6 +171,77 @@ async def send_media_from_session(
         session.status = SessionStatus.active
         db.commit()
         return extract_sent_message_id(sent)
+
+
+async def find_forwardable_source_message_ids(
+    *,
+    client,
+    text: str,
+    media_count: int,
+    created_at: datetime | None,
+) -> list[int]:
+    if not text or not media_count:
+        return []
+
+    bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
+    entity = await client.get_entity(bot_peer)
+    normalized_text = normalize_plain_text(text)
+    if not normalized_text:
+        return []
+
+    single_candidates: list[tuple[float, list[int]]] = []
+    grouped: dict[int, list] = {}
+
+    async for message in client.iter_messages(entity, limit=160):
+        if not is_outgoing_message(message):
+            continue
+        if not near_datetime(getattr(message, "date", None), created_at):
+            continue
+        if not getattr(message, "media", None):
+            continue
+
+        grouped_id = getattr(message, "grouped_id", None)
+        if grouped_id:
+            grouped.setdefault(int(grouped_id), []).append(message)
+            continue
+
+        raw_text = normalize_plain_text(
+            getattr(message, "raw_text", None) or getattr(message, "message", None)
+        )
+        if media_count == 1 and raw_text == normalized_text:
+            single_candidates.append((message_distance(message, created_at), [int(message.id)]))
+
+    for messages in grouped.values():
+        if len(messages) != media_count:
+            continue
+        has_text = any(
+            normalize_plain_text(getattr(message, "raw_text", None) or getattr(message, "message", None))
+            == normalized_text
+            for message in messages
+        )
+        if not has_text:
+            continue
+        ids = sorted(int(message.id) for message in messages)
+        single_candidates.append((min(message_distance(message, created_at) for message in messages), ids))
+
+    if not single_candidates:
+        return []
+    return min(single_candidates, key=lambda candidate: candidate[0])[1]
+
+
+def is_outgoing_message(message) -> bool:
+    return bool(getattr(message, "out", False) or getattr(message, "outgoing", False))
+
+
+def message_distance(message, reference: datetime | None) -> float:
+    message_date = getattr(message, "date", None)
+    if not message_date or not reference:
+        return 0.0
+    if message_date.tzinfo is None:
+        message_date = message_date.replace(tzinfo=UTC)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=UTC)
+    return abs((message_date - reference).total_seconds())
 
 
 async def send_files_with_optional_text(
