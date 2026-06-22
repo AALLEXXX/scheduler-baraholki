@@ -1006,6 +1006,7 @@ def test_audit_lists_owner_jobs_with_post_and_target_details(
     assert data["items"][0]["post_id"] == str(post.id)
     assert data["items"][0]["post_title"] == post.title
     assert data["items"][0]["post_preview"] == "Audit body"
+    assert data["items"][0]["media_count"] == 0
     assert data["items"][0]["target_chat_title"] == "Main Group"
     assert data["items"][0]["status"] in {done_job.status.value, failed_job.status.value}
 

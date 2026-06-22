@@ -65,6 +65,7 @@ class TelegramSession(Base):
     api_id: Mapped[int | None] = mapped_column(Integer)
     api_hash: Mapped[str | None] = mapped_column(String(160))
     phone_code_hash: Mapped[str | None] = mapped_column(String(300))
+    session_string: Mapped[str | None] = mapped_column(Text)
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus), default=SessionStatus.needs_login
     )

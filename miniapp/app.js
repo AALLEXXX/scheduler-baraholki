@@ -14,6 +14,7 @@ const state = {
   folders: [],
   posts: [],
   audit: { items: [], page: 1, page_size: 20, total: 0 },
+  auditLoading: false,
   activeTab: "posts",
   pendingSessionId: null,
   selectedDraftId: null,
@@ -218,6 +219,26 @@ function auditStatusLabel(status) {
   if (status === "processing") return "Отправляется";
   if (status === "cancelled") return "Отменено";
   return status;
+}
+
+function auditStatusIcon(status) {
+  if (status === "done") return "✓";
+  if (status === "failed") return "!";
+  if (status === "processing") return "…";
+  if (status === "cancelled") return "×";
+  return "•";
+}
+
+function shortWords(value, maxWords = 8) {
+  const words = stripHtml(value || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  return `${words.slice(0, maxWords).join(" ")}...`;
+}
+
+function mediaCountLabel(count) {
+  if (!count) return "без фото";
+  if (count === 1) return "1 фото";
+  return `${count} фото`;
 }
 
 function formatDateTime(value) {
@@ -486,10 +507,14 @@ function renderAuditPagination() {
 
 function renderAudit() {
   const total = state.audit.total || 0;
-  document.querySelector("#audit-count").textContent = `${total} записей`;
+  document.querySelector("#audit-count").textContent = state.auditLoading ? "Загрузка..." : `${total} записей`;
   renderAuditPagination();
 
   const list = document.querySelector("#audit-list");
+  if (state.auditLoading) {
+    list.replaceChildren(loadingBlock("Загружаем историю отправок"));
+    return;
+  }
   if (total === 0) {
     list.replaceChildren(emptyPost(activeSessions().length ? "Истории отправок пока нет" : "Подключите аккаунт"));
     return;
@@ -501,14 +526,14 @@ function renderAudit() {
 function renderAuditItem(item) {
   const node = document.createElement("article");
   node.className = `audit-item ${item.status}`.trim();
-  const preview = stripHtml(item.post_preview || item.post_title || "");
+  const title = shortWords(item.post_title || item.post_preview || "Пост из Telegram", 9);
   node.innerHTML = `
     <div class="audit-item-head">
+      <span class="audit-status-icon" data-field="status-icon"></span>
       <div>
         <strong data-field="title"></strong>
-        <p data-field="preview"></p>
+        <p data-field="media"></p>
       </div>
-      <span data-field="status"></span>
     </div>
     <dl class="audit-meta">
       <div><dt>Куда</dt><dd data-field="target"></dd></div>
@@ -516,10 +541,9 @@ function renderAuditItem(item) {
       <div><dt>Результат</dt><dd data-field="result"></dd></div>
     </dl>
   `;
-  node.querySelector('[data-field="title"]').textContent = item.post_title || "Пост из Telegram";
-  node.querySelector('[data-field="preview"]').textContent =
-    preview.length > 160 ? `${preview.slice(0, 160)}...` : preview || "Медиа без текста";
-  node.querySelector('[data-field="status"]').textContent = auditStatusLabel(item.status);
+  node.querySelector('[data-field="title"]').textContent = title || "Пост из Telegram";
+  node.querySelector('[data-field="media"]').textContent = mediaCountLabel(item.media_count || 0);
+  node.querySelector('[data-field="status-icon"]').textContent = auditStatusIcon(item.status);
   node.querySelector('[data-field="target"]').textContent = item.target_chat_title || "Группа не найдена";
   node.querySelector('[data-field="time"]').textContent = formatDateTime(item.updated_at || item.due_at);
   node.querySelector('[data-field="result"]').textContent =
@@ -579,6 +603,14 @@ function emptyPost(text) {
   const node = document.createElement("div");
   node.className = "empty-post";
   node.textContent = text;
+  return node;
+}
+
+function loadingBlock(text) {
+  const node = document.createElement("div");
+  node.className = "loading-block";
+  node.innerHTML = "<span></span><p></p>";
+  node.querySelector("p").textContent = text;
   return node;
 }
 
@@ -745,20 +777,18 @@ function deletionMessage(result) {
 }
 
 async function load(options = {}) {
-  const [config, sessions, chats, folders, posts, audit] = await Promise.all([
+  const [config, sessions, chats, folders, posts] = await Promise.all([
     api("app-config"),
     api("sessions"),
     api("chats"),
     api("folders"),
     api("posts"),
-    api(`audit?page=${state.auditPage}&page_size=${state.auditPageSize}`),
   ]);
   state.config = config;
   state.sessions = sessions;
   state.chats = chats;
   state.folders = folders;
   state.posts = posts;
-  state.audit = audit;
   if (!state.folders.some((folder) => String(folder.id) === state.selectedFolderId)) {
     state.selectedFolderId = "all";
   }
@@ -772,6 +802,21 @@ async function load(options = {}) {
   if (options.autoSyncGroups && activeSessions().length > 0 && !state.groupsSyncedOnInit) {
     state.groupsSyncedOnInit = true;
     await syncGroups({ silent: true });
+  }
+
+  if (state.activeTab === "audit") {
+    await loadAudit();
+  }
+}
+
+async function loadAudit(options = {}) {
+  state.auditLoading = true;
+  if (options.renderFirst) render();
+  try {
+    state.audit = await api(`audit?page=${state.auditPage}&page_size=${state.auditPageSize}`);
+  } finally {
+    state.auditLoading = false;
+    render();
   }
 }
 
@@ -844,7 +889,7 @@ document.querySelectorAll(".tab-button").forEach((button) => {
   button.addEventListener("click", () => {
     state.activeTab = button.dataset.tab;
     if (state.activeTab === "audit") {
-      load().catch((error) => notify(error.message, "error"));
+      loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
       return;
     }
     render();
@@ -942,12 +987,12 @@ document.querySelector("#posts-next").addEventListener("click", () => {
 
 document.querySelector("#audit-prev").addEventListener("click", () => {
   state.auditPage -= 1;
-  load().catch((error) => notify(error.message, "error"));
+  loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#audit-next").addEventListener("click", () => {
   state.auditPage += 1;
-  load().catch((error) => notify(error.message, "error"));
+  loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {

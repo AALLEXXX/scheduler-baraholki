@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from telethon import types
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.sessions import StringSession
 
 from autopost_manager import telegram_client
 from autopost_manager.models import SessionStatus
@@ -102,8 +103,8 @@ def test_build_client_uses_session_specific_api_credentials(monkeypatch, db_sess
     calls: dict[str, object] = {}
 
     class FakeTelegramClient:
-        def __init__(self, session_path, api_id, api_hash) -> None:
-            calls["session_path"] = session_path
+        def __init__(self, session_storage, api_id, api_hash) -> None:
+            calls["session_storage"] = session_storage
             calls["api_id"] = api_id
             calls["api_hash"] = api_hash
 
@@ -115,11 +116,9 @@ def test_build_client_uses_session_specific_api_credentials(monkeypatch, db_sess
     client = telegram_client.build_client(session)
 
     assert isinstance(client, FakeTelegramClient)
-    assert calls == {
-        "session_path": session.session_path,
-        "api_id": 999999,
-        "api_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    }
+    assert isinstance(calls["session_storage"], StringSession)
+    assert calls["api_id"] == 999999
+    assert calls["api_hash"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_send_message_rate_limits_sends_and_updates_session(monkeypatch, db_session) -> None:

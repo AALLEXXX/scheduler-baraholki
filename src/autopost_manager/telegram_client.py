@@ -13,6 +13,7 @@ import aiohttp
 from sqlalchemy.orm import Session
 from telethon import TelegramClient, functions, types, utils
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.sessions import SQLiteSession, StringSession
 
 from autopost_manager.config import get_settings
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
@@ -45,7 +46,32 @@ def build_client(session: TelegramSession) -> TelegramClient:
     settings = get_settings()
     api_id = session.api_id or settings.telegram_api_id
     api_hash = session.api_hash or settings.telegram_api_hash
-    return TelegramClient(session.session_path, api_id, api_hash)
+    session_string = session.session_string or legacy_session_string(session.session_path)
+    if session_string and session_string != session.session_string:
+        session.session_string = session_string
+    return TelegramClient(StringSession(session_string or ""), api_id, api_hash)
+
+
+def legacy_session_string(session_path: str | None) -> str:
+    if not session_path or not Path(f"{session_path}.session").exists():
+        return ""
+    try:
+        legacy_session = SQLiteSession(session_path)
+        try:
+            return StringSession.save(legacy_session)
+        finally:
+            legacy_session.close()
+    except Exception:
+        return ""
+
+
+def remember_client_session(session: TelegramSession, client) -> None:
+    client_session = getattr(client, "session", None)
+    if not client_session:
+        return
+    session_string = StringSession.save(client_session)
+    if session_string:
+        session.session_string = session_string
 
 
 async def send_message_from_session(
@@ -72,6 +98,7 @@ async def send_message_from_session(
                 raise RuntimeError("Telegram session needs login")
             message = await client.send_message(chat_id, text, parse_mode=parse_mode)
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
 
         session.last_send_at = datetime.now(UTC)
@@ -146,7 +173,7 @@ async def send_media_from_session(
                 bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
                 entity = await client.get_entity(bot_peer)
                 sent = await client.forward_messages(
-                    chat_id=chat_id,
+                    chat_id,
                     messages=source_message_ids[0]
                     if len(source_message_ids) == 1
                     else source_message_ids,
@@ -178,6 +205,7 @@ async def send_media_from_session(
         finally:
             for temp_file in temp_files:
                 Path(temp_file).unlink(missing_ok=True)
+            remember_client_session(session, client)
             await client.disconnect()
 
         session.last_send_at = datetime.now(UTC)
@@ -346,6 +374,7 @@ async def delete_messages_from_session(
             ids_to_delete = matched_ids or set(message_ids)
             await client.delete_messages(entity, sorted(ids_to_delete), revoke=True)
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
     return len(ids_to_delete)
 
@@ -532,6 +561,7 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
                 )
             return rows
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
 
 
@@ -566,6 +596,7 @@ async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, 
                     }
                 )
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
         return rows
 
@@ -577,6 +608,7 @@ async def request_login_code(session: TelegramSession) -> str:
         try:
             sent_code = await client.send_code_request(session.phone)
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
         return sent_code.phone_code_hash
 
@@ -597,6 +629,7 @@ async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool,
             me = await client.get_me()
             return True, me
         finally:
+            remember_client_session(session, client)
             await client.disconnect()
 
 
@@ -608,4 +641,5 @@ async def confirm_login_password(session: TelegramSession, password: str) -> obj
             await client.sign_in(password=password)
             return await client.get_me()
         finally:
+            remember_client_session(session, client)
             await client.disconnect()

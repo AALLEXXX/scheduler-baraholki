@@ -442,6 +442,7 @@ def logout_account(
     for session in sessions:
         session.status = SessionStatus.revoked
         session.phone_code_hash = None
+        session.session_string = None
         delete_session_files(session.session_path)
 
     for chat in chats:
@@ -539,6 +540,7 @@ async def list_folders(
         folders = await list_dialog_folders_from_session(session)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.commit()
 
     enabled_chat_ids = set(
         db.scalars(
@@ -854,6 +856,7 @@ def list_audit(
                 post_id=post.id,
                 post_title=post.title,
                 post_preview=post.body,
+                media_count=len(post.media_items),
                 target_chat_id=chat.id,
                 target_chat_title=chat.title,
                 due_at=job.due_at,

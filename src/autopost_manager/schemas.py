@@ -158,6 +158,7 @@ class AuditItemOut(BaseModel):
     post_id: uuid.UUID
     post_title: str
     post_preview: str
+    media_count: int
     target_chat_id: uuid.UUID
     target_chat_title: str
     due_at: datetime

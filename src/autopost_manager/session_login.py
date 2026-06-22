@@ -4,6 +4,7 @@ import asyncio
 import sys
 
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
@@ -15,14 +16,16 @@ async def login_session(name: str, phone: str) -> None:
     settings = get_settings()
     settings.telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
     session_path = str(settings.telegram_sessions_dir / name.replace(" ", "_").lower())
+    string_session = StringSession()
 
     async with TelegramClient(
-        session_path,
+        string_session,
         settings.telegram_api_id,
         settings.telegram_api_hash,
     ) as client:
         await client.start(phone=phone)
         me = await client.get_me()
+        session_string = StringSession.save(client.session)
 
     with SessionLocal() as db:
         existing = db.query(TelegramSession).filter(TelegramSession.name == name).one_or_none()
@@ -32,6 +35,7 @@ async def login_session(name: str, phone: str) -> None:
             existing.username = me.username
             existing.status = SessionStatus.active
             existing.session_path = session_path
+            existing.session_string = session_string
         else:
             db.add(
                 TelegramSession(
@@ -42,6 +46,7 @@ async def login_session(name: str, phone: str) -> None:
                     username=me.username,
                     status=SessionStatus.active,
                     session_path=session_path,
+                    session_string=session_string,
                     min_send_interval_seconds=settings.default_min_send_interval_seconds,
                 )
             )

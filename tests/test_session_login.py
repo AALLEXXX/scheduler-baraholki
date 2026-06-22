@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from telethon.sessions import StringSession
+
 from autopost_manager import session_login
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import SessionStatus, TelegramSession
@@ -14,6 +16,7 @@ class FakeTelegramClient:
         self.session_path = session_path
         self.api_id = api_id
         self.api_hash = api_hash
+        self.session = StringSession()
 
     async def __aenter__(self):
         return self
