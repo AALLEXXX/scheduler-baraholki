@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import re
 import tempfile
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from html import unescape
 from pathlib import Path
@@ -24,6 +26,21 @@ def _lock_for(session_path: str) -> asyncio.Lock:
     return _locks[session_path]
 
 
+@asynccontextmanager
+async def session_lock(session_path: str):
+    lock = _lock_for(session_path)
+    async with lock:
+        lock_path = Path(f"{session_path}.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = lock_path.open("a")
+        try:
+            await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+
+
 def build_client(session: TelegramSession) -> TelegramClient:
     settings = get_settings()
     api_id = session.api_id or settings.telegram_api_id
@@ -38,9 +55,7 @@ async def send_message_from_session(
     text: str,
     parse_mode: str | None,
 ) -> int:
-    lock = _lock_for(session.session_path)
-
-    async with lock:
+    async with session_lock(session.session_path):
         now = datetime.now(UTC)
         if session.last_send_at:
             elapsed = (now - session.last_send_at).total_seconds()
@@ -101,9 +116,7 @@ async def send_media_from_session(
     parse_mode: str | None,
     source_created_at: datetime | None = None,
 ) -> int:
-    lock = _lock_for(session.session_path)
-
-    async with lock:
+    async with session_lock(session.session_path):
         now = datetime.now(UTC)
         if session.last_send_at:
             elapsed = (now - session.last_send_at).total_seconds()
@@ -315,8 +328,7 @@ async def delete_messages_from_session(
     if not message_ids and not match_texts and not ack_text and not media_count:
         return 0
 
-    lock = _lock_for(session.session_path)
-    async with lock:
+    async with session_lock(session.session_path):
         client = build_client(session)
         await client.connect()
         try:
@@ -483,43 +495,44 @@ def folder_chat_ids(folder, dialogs: list[dict[str, object]]) -> list[int]:
 
 
 async def list_dialog_folders_from_session(session: TelegramSession) -> list[dict[str, object]]:
-    client = build_client(session)
-    dialogs: list[dict[str, object]] = []
-    await client.connect()
-    try:
-        if not await client.is_user_authorized():
-            raise RuntimeError("Telegram session needs login")
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        dialogs: list[dict[str, object]] = []
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telegram session needs login")
 
-        async for dialog in client.iter_dialogs(limit=300):
-            if not (dialog.is_group or dialog.is_channel):
-                continue
-            dialogs.append(
-                {
-                    "telegram_chat_id": int(dialog.id),
-                    "is_group": bool(dialog.is_group),
-                    "is_channel": bool(dialog.is_channel),
-                }
-            )
+            async for dialog in client.iter_dialogs(limit=300):
+                if not (dialog.is_group or dialog.is_channel):
+                    continue
+                dialogs.append(
+                    {
+                        "telegram_chat_id": int(dialog.id),
+                        "is_group": bool(dialog.is_group),
+                        "is_channel": bool(dialog.is_channel),
+                    }
+                )
 
-        folder_response = await client(functions.messages.GetDialogFiltersRequest())
-        folders = getattr(folder_response, "filters", folder_response)
-        rows: list[dict[str, object]] = []
-        for folder in folders:
-            if not isinstance(folder, types.DialogFilter):
-                continue
-            chat_ids = folder_chat_ids(folder, dialogs)
-            if not chat_ids:
-                continue
-            rows.append(
-                {
-                    "id": int(folder.id),
-                    "title": text_from_telegram_title(folder.title),
-                    "telegram_chat_ids": chat_ids,
-                }
-            )
-        return rows
-    finally:
-        await client.disconnect()
+            folder_response = await client(functions.messages.GetDialogFiltersRequest())
+            folders = getattr(folder_response, "filters", folder_response)
+            rows: list[dict[str, object]] = []
+            for folder in folders:
+                if not isinstance(folder, types.DialogFilter):
+                    continue
+                chat_ids = folder_chat_ids(folder, dialogs)
+                if not chat_ids:
+                    continue
+                rows.append(
+                    {
+                        "id": int(folder.id),
+                        "title": text_from_telegram_title(folder.title),
+                        "telegram_chat_ids": chat_ids,
+                    }
+                )
+            return rows
+        finally:
+            await client.disconnect()
 
 
 def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:
@@ -531,64 +544,68 @@ def classify_send_error(exc: Exception, session: TelegramSession | None = None) 
 
 
 async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, object]]:
-    client = build_client(session)
-    rows: list[dict[str, object]] = []
-    await client.connect()
-    try:
-        if not await client.is_user_authorized():
-            raise RuntimeError("Telegram session needs login")
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        rows: list[dict[str, object]] = []
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telegram session needs login")
 
-        async for dialog in client.iter_dialogs(limit=300):
-            if not (dialog.is_group or dialog.is_channel):
-                continue
-            entity = dialog.entity
-            rows.append(
-                {
-                    "telegram_chat_id": int(dialog.id),
-                    "title": dialog.name,
-                    "username": getattr(entity, "username", None),
-                    "is_group": bool(dialog.is_group),
-                    "is_channel": bool(dialog.is_channel),
-                }
-            )
-    finally:
-        await client.disconnect()
-    return rows
+            async for dialog in client.iter_dialogs(limit=300):
+                if not (dialog.is_group or dialog.is_channel):
+                    continue
+                entity = dialog.entity
+                rows.append(
+                    {
+                        "telegram_chat_id": int(dialog.id),
+                        "title": dialog.name,
+                        "username": getattr(entity, "username", None),
+                        "is_group": bool(dialog.is_group),
+                        "is_channel": bool(dialog.is_channel),
+                    }
+                )
+        finally:
+            await client.disconnect()
+        return rows
 
 
 async def request_login_code(session: TelegramSession) -> str:
-    client = build_client(session)
-    await client.connect()
-    try:
-        sent_code = await client.send_code_request(session.phone)
-    finally:
-        await client.disconnect()
-    return sent_code.phone_code_hash
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        await client.connect()
+        try:
+            sent_code = await client.send_code_request(session.phone)
+        finally:
+            await client.disconnect()
+        return sent_code.phone_code_hash
 
 
 async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool, object | None]:
-    client = build_client(session)
-    await client.connect()
-    try:
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        await client.connect()
         try:
-            await client.sign_in(
-                phone=session.phone,
-                code=code,
-                phone_code_hash=session.phone_code_hash,
-            )
-        except SessionPasswordNeededError:
-            return False, None
-        me = await client.get_me()
-        return True, me
-    finally:
-        await client.disconnect()
+            try:
+                await client.sign_in(
+                    phone=session.phone,
+                    code=code,
+                    phone_code_hash=session.phone_code_hash,
+                )
+            except SessionPasswordNeededError:
+                return False, None
+            me = await client.get_me()
+            return True, me
+        finally:
+            await client.disconnect()
 
 
 async def confirm_login_password(session: TelegramSession, password: str) -> object:
-    client = build_client(session)
-    await client.connect()
-    try:
-        await client.sign_in(password=password)
-        return await client.get_me()
-    finally:
-        await client.disconnect()
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        await client.connect()
+        try:
+            await client.sign_in(password=password)
+            return await client.get_me()
+        finally:
+            await client.disconnect()
