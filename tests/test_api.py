@@ -119,6 +119,43 @@ def test_create_interval_post_enforces_spam_limits(client, auth_user, db_session
     assert accepted.json()["interval_minutes"] == 20
 
 
+def test_create_custom_weekdays_post_requires_and_returns_days(
+    client,
+    auth_user,
+    db_session,
+) -> None:
+    auth_user(111)
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    db_session.commit()
+
+    missing_days = client.post(
+        "/api/posts",
+        json=post_payload(
+            str(session.id),
+            [str(chat.id)],
+            schedule_kind="custom_weekdays",
+            schedule_weekdays=[],
+        ),
+    )
+    assert missing_days.status_code == 422
+    assert "день недели" in missing_days.text
+
+    accepted = client.post(
+        "/api/posts",
+        json=post_payload(
+            str(session.id),
+            [str(chat.id)],
+            schedule_kind="custom_weekdays",
+            schedule_weekdays=[0, 2, 4],
+        ),
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["schedule_kind"] == "custom_weekdays"
+    assert accepted.json()["schedule_weekdays"] == [0, 2, 4]
+
+
 def test_create_post_rejects_foreign_session_and_chat(client, auth_user, db_session) -> None:
     auth_user(222)
     foreign_session = make_session(db_session, owner_id=111)

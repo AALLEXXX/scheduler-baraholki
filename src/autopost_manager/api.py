@@ -89,6 +89,7 @@ def post_to_out(post: Post) -> PostOut:
         schedule_kind=post.schedule_kind,
         next_run_at=post.next_run_at,
         interval_minutes=post.interval_minutes,
+        schedule_weekdays=parse_schedule_weekdays(post.schedule_weekdays),
         timezone=post.timezone,
         session_strategy=post.session_strategy,
         default_session_id=post.default_session_id,
@@ -115,6 +116,36 @@ def as_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def parse_schedule_weekdays(value: str | None) -> list[int]:
+    if not value:
+        return []
+    days: list[int] = []
+    for item in value.split(","):
+        try:
+            day = int(item)
+        except ValueError:
+            continue
+        if 0 <= day <= 6 and day not in days:
+            days.append(day)
+    return days
+
+
+def serialize_schedule_weekdays(values: list[int] | None) -> str | None:
+    if not values:
+        return None
+    days = sorted({int(value) for value in values if 0 <= int(value) <= 6})
+    return ",".join(str(day) for day in days) if days else None
+
+
+def schedule_weekdays_for_storage(
+    schedule_kind: ScheduleKind,
+    values: list[int] | None,
+) -> str | None:
+    if schedule_kind != ScheduleKind.custom_weekdays:
+        return None
+    return serialize_schedule_weekdays(values)
 
 
 def cancel_pending_jobs(post: Post, db: Session) -> int:
@@ -227,6 +258,7 @@ def validate_post_schedule(
     schedule_kind: ScheduleKind,
     next_run_at: datetime | None,
     interval_minutes: int | None,
+    schedule_weekdays: list[int] | None,
     spam_risk_acknowledged: bool,
     default_session_id: uuid.UUID | None,
     target_chat_ids: list[uuid.UUID],
@@ -246,6 +278,10 @@ def validate_post_schedule(
                 status_code=422,
                 detail="Подтвердите риск: за частую отправку сообщений Telegram может ограничить аккаунт",
             )
+    elif schedule_kind == ScheduleKind.custom_weekdays:
+        days = serialize_schedule_weekdays(schedule_weekdays)
+        if not days:
+            raise HTTPException(status_code=422, detail="Выберите хотя бы один день недели")
 
     if not default_session_id:
         raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
@@ -625,6 +661,7 @@ def create_post(
             schedule_kind=payload.schedule_kind,
             next_run_at=payload.next_run_at,
             interval_minutes=payload.interval_minutes,
+            schedule_weekdays=payload.schedule_weekdays,
             spam_risk_acknowledged=payload.spam_risk_acknowledged,
             default_session_id=payload.default_session_id,
             target_chat_ids=payload.target_chat_ids,
@@ -637,7 +674,13 @@ def create_post(
         db=db,
     )
 
-    post_data = payload.model_dump(exclude={"target_chat_ids", "spam_risk_acknowledged"})
+    post_data = payload.model_dump(
+        exclude={"target_chat_ids", "spam_risk_acknowledged", "schedule_weekdays"}
+    )
+    post_data["schedule_weekdays"] = schedule_weekdays_for_storage(
+        payload.schedule_kind,
+        payload.schedule_weekdays,
+    )
     post = Post(**post_data, created_by_telegram_id=telegram_user_id)
     db.add(post)
     db.flush()
@@ -664,6 +707,7 @@ def schedule_post(
         schedule_kind=payload.schedule_kind,
         next_run_at=payload.next_run_at,
         interval_minutes=payload.interval_minutes,
+        schedule_weekdays=payload.schedule_weekdays,
         spam_risk_acknowledged=payload.spam_risk_acknowledged,
         default_session_id=payload.default_session_id,
         target_chat_ids=payload.target_chat_ids,
@@ -679,6 +723,10 @@ def schedule_post(
     post.schedule_kind = payload.schedule_kind
     post.next_run_at = payload.next_run_at
     post.interval_minutes = payload.interval_minutes
+    post.schedule_weekdays = schedule_weekdays_for_storage(
+        payload.schedule_kind,
+        payload.schedule_weekdays,
+    )
     post.timezone = payload.timezone
     post.default_session_id = payload.default_session_id
     cancel_pending_jobs(post, db)

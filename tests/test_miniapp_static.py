@@ -239,6 +239,25 @@ def test_miniapp_spam_guard_is_visible_in_ui_and_payload() -> None:
     assert "spam_risk_acknowledged" in js
 
 
+def test_miniapp_supports_rich_schedule_modes() -> None:
+    html = read("index.html")
+    js = read("app.js")
+
+    for value in [
+        "daily",
+        "weekdays",
+        "weekends",
+        "every_other_day",
+        "custom_weekdays",
+    ]:
+        assert f'value="{value}"' in html
+
+    assert 'name="schedule_weekdays"' in html
+    assert "schedule_weekdays: scheduleWeekdays" in js
+    assert "weekdaySummary" in js
+    assert "updateScheduleControls" in js
+
+
 def test_miniapp_cache_bust_versions_match_for_css_and_js() -> None:
     html = read("index.html")
     versions = re.findall(r"[.?&]v=(\d{8}-\d+)", html)

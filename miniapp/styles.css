@@ -292,6 +292,46 @@ button:disabled {
   gap: 12px;
 }
 
+.weekday-row {
+  display: grid;
+  gap: 8px;
+}
+
+.weekday-row > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.weekday-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.weekday-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: auto;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--surface-strong) 86%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.weekday-list input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
 label {
   display: grid;
   gap: 6px;

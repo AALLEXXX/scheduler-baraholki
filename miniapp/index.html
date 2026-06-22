@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-12" />
+    <link rel="stylesheet" href="styles.css?v=20260623-13" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -105,6 +105,11 @@
               <select name="schedule_kind">
                 <option value="once">Один раз</option>
                 <option value="interval">Каждые N минут</option>
+                <option value="daily">Каждый день</option>
+                <option value="weekdays">Только будни</option>
+                <option value="weekends">Только выходные</option>
+                <option value="every_other_day">Через день</option>
+                <option value="custom_weekdays">Выбрать дни недели</option>
               </select>
             </label>
           </div>
@@ -113,6 +118,19 @@
             Интервал, минут
             <input name="interval_minutes" type="number" min="20" value="60" />
           </label>
+
+          <div id="weekday-row" class="weekday-row" hidden>
+            <span>Дни недели</span>
+            <div class="weekday-list">
+              <label><input name="schedule_weekdays" type="checkbox" value="0" /> Пн</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="1" /> Вт</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="2" /> Ср</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="3" /> Чт</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="4" /> Пт</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="5" /> Сб</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="6" /> Вс</label>
+            </div>
+          </div>
 
           <div>
             <div class="section-row">
@@ -191,6 +209,11 @@
                 <select name="schedule_kind">
                   <option value="once">Один раз</option>
                   <option value="interval">Каждые N минут</option>
+                  <option value="daily">Каждый день</option>
+                  <option value="weekdays">Только будни</option>
+                  <option value="weekends">Только выходные</option>
+                  <option value="every_other_day">Через день</option>
+                  <option value="custom_weekdays">Выбрать дни недели</option>
                 </select>
               </label>
             </div>
@@ -199,6 +222,19 @@
               Интервал, минут
               <input name="interval_minutes" type="number" min="20" value="60" />
             </label>
+
+            <div id="edit-weekday-row" class="weekday-row" hidden>
+              <span>Дни недели</span>
+              <div class="weekday-list">
+                <label><input name="schedule_weekdays" type="checkbox" value="0" /> Пн</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="1" /> Вт</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="2" /> Ср</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="3" /> Чт</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="4" /> Пт</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="5" /> Сб</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="6" /> Вс</label>
+              </div>
+            </div>
 
             <div>
               <div class="section-row">
@@ -226,6 +262,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260623-12"></script>
+    <script src="app.js?v=20260623-13"></script>
   </body>
 </html>

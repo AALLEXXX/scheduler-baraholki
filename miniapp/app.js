@@ -259,7 +259,23 @@ function scheduleLabel(post) {
   if (post.schedule_kind === "interval") {
     return `${when}, затем каждые ${post.interval_minutes} мин.`;
   }
+  if (post.schedule_kind === "daily") return `${when}, затем каждый день`;
+  if (post.schedule_kind === "weekdays") return `${when}, затем по будням`;
+  if (post.schedule_kind === "weekends") return `${when}, затем по выходным`;
+  if (post.schedule_kind === "every_other_day") return `${when}, затем через день`;
+  if (post.schedule_kind === "weekly") return `${when}, затем раз в неделю`;
+  if (post.schedule_kind === "custom_weekdays") {
+    return `${when}, затем ${weekdaySummary(post.schedule_weekdays || [])}`;
+  }
   return `${when}, один раз`;
+}
+
+function weekdaySummary(days) {
+  const names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const selected = [...new Set((days || []).map((day) => Number(day)).filter((day) => day >= 0 && day <= 6))]
+    .sort((left, right) => left - right)
+    .map((day) => names[day]);
+  return selected.length ? selected.join(", ") : "по выбранным дням";
 }
 
 function targetSummary(post) {
@@ -274,6 +290,29 @@ function mediaLabel(post) {
   if (!count) return "без медиа";
   if (count === 1) return "1 медиа";
   return `${count} медиа`;
+}
+
+function scheduleNeedsWeekdays(scheduleKind) {
+  return scheduleKind === "custom_weekdays";
+}
+
+function updateScheduleControls(form, prefix = "") {
+  const scheduleKind = form.elements.schedule_kind.value;
+  document.querySelector(`#${prefix}interval-row`).hidden = scheduleKind !== "interval";
+  document.querySelector(`#${prefix}weekday-row`).hidden = !scheduleNeedsWeekdays(scheduleKind);
+}
+
+function selectedWeekdays(form) {
+  return [...form.querySelectorAll('input[name="schedule_weekdays"]:checked')].map((input) =>
+    Number(input.value),
+  );
+}
+
+function setSelectedWeekdays(form, days) {
+  const selected = new Set((days || []).map((day) => Number(day)));
+  form.querySelectorAll('input[name="schedule_weekdays"]').forEach((input) => {
+    input.checked = selected.has(Number(input.value));
+  });
 }
 
 async function confirmSpamRiskIfNeeded(intervalMinutes) {
@@ -736,9 +775,10 @@ function openEditPost(post, options = {}) {
     : dateTimeLocalValue(post.next_run_at);
   form.elements.schedule_kind.value = post.schedule_kind || "once";
   form.elements.interval_minutes.value = post.interval_minutes || 60;
+  setSelectedWeekdays(form, post.schedule_weekdays || []);
   document.querySelector("#edit-preview").textContent = preview.length > 180 ? `${preview.slice(0, 180)}...` : preview;
   document.querySelector("#edit-group-search").value = "";
-  document.querySelector("#edit-interval-row").hidden = form.elements.schedule_kind.value !== "interval";
+  updateScheduleControls(form, "edit-");
   document.querySelector("#edit-modal").hidden = false;
   renderEditFolderPicker();
   renderEditGroupPicker();
@@ -918,11 +958,11 @@ document.querySelector("#logout-account").addEventListener("click", async () => 
 });
 
 document.querySelector("#post-form select[name=schedule_kind]").addEventListener("change", (event) => {
-  document.querySelector("#interval-row").hidden = event.target.value !== "interval";
+  updateScheduleControls(event.target.form);
 });
 
 document.querySelector("#edit-form select[name=schedule_kind]").addEventListener("change", (event) => {
-  document.querySelector("#edit-interval-row").hidden = event.target.value !== "interval";
+  updateScheduleControls(event.target.form, "edit-");
 });
 
 document.querySelector("#group-search").addEventListener("input", (event) => {
@@ -1092,6 +1132,7 @@ document.querySelector("#edit-form").addEventListener("submit", async (event) =>
   const scheduleKind = form.get("schedule_kind");
   const nextRun = form.get("next_run_at");
   const intervalMinutes = scheduleKind === "interval" ? Number(form.get("interval_minutes")) : null;
+  const scheduleWeekdays = selectedWeekdays(event.currentTarget);
 
   if (!post || !postId) {
     notify("Пост не найден. Обновите страницу.", "error");
@@ -1113,6 +1154,10 @@ document.querySelector("#edit-form").addEventListener("submit", async (event) =>
     const confirmed = await confirmSpamRiskIfNeeded(intervalMinutes);
     if (!confirmed) return;
   }
+  if (scheduleNeedsWeekdays(scheduleKind) && scheduleWeekdays.length === 0) {
+    notify("Выберите хотя бы один день недели.", "error");
+    return;
+  }
 
   const button = document.querySelector("#edit-save");
   setBusy(button, true, "Сохраняем...");
@@ -1124,6 +1169,7 @@ document.querySelector("#edit-form").addEventListener("submit", async (event) =>
         schedule_kind: scheduleKind,
         next_run_at: new Date(nextRun).toISOString(),
         interval_minutes: intervalMinutes,
+        schedule_weekdays: scheduleWeekdays,
         spam_risk_acknowledged: scheduleKind === "interval" && intervalMinutes <= 30,
         default_session_id: sessionId,
         target_chat_ids: checkedGroups,
@@ -1151,6 +1197,7 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
   const scheduleKind = form.get("schedule_kind");
   const nextRun = form.get("next_run_at");
   const draftId = state.selectedDraftId;
+  const scheduleWeekdays = selectedWeekdays(formElement);
 
   if (!sessionId) {
     notify("Подключите аккаунт.", "error");
@@ -1175,6 +1222,10 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
     const confirmed = await confirmSpamRiskIfNeeded(intervalMinutes);
     if (!confirmed) return;
   }
+  if (scheduleNeedsWeekdays(scheduleKind) && scheduleWeekdays.length === 0) {
+    notify("Выберите хотя бы один день недели.", "error");
+    return;
+  }
 
   const button = document.querySelector("#save-post");
   setBusy(button, true, "Сохраняем...");
@@ -1186,6 +1237,7 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
         schedule_kind: scheduleKind,
         next_run_at: new Date(nextRun).toISOString(),
         interval_minutes: intervalMinutes,
+        schedule_weekdays: scheduleWeekdays,
         spam_risk_acknowledged: scheduleKind === "interval" && intervalMinutes <= 30,
         default_session_id: sessionId,
         target_chat_ids: checkedGroups,
@@ -1198,7 +1250,7 @@ document.querySelector("#post-form").addEventListener("submit", async (event) =>
     state.groupPage = 1;
     state.selectedDraftId = null;
     document.querySelector("#group-search").value = "";
-    document.querySelector("#interval-row").hidden = true;
+    updateScheduleControls(formElement);
     notify("Пост запланирован.");
     await load();
   } catch (error) {

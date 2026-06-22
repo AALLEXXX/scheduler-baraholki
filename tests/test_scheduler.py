@@ -64,6 +64,87 @@ def test_enqueue_due_interval_post_creates_job_and_moves_next_run_forward(db_ses
         assert db.query(PublishJob).count() == 1
 
 
+def test_enqueue_due_daily_post_moves_to_next_day(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    old_next_run = datetime.now(UTC) - timedelta(seconds=1)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.daily,
+        next_run_at=old_next_run,
+    )
+    db_session.commit()
+
+    created = scheduler.enqueue_due_posts()
+
+    assert created == 1
+    with SessionLocal() as db:
+        refreshed = db.get(Post, post.id)
+        assert refreshed.status == PostStatus.scheduled
+        assert as_aware(refreshed.next_run_at) == old_next_run + timedelta(days=1)
+
+
+def test_enqueue_due_every_other_day_post_moves_two_days(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    old_next_run = datetime.now(UTC) - timedelta(seconds=1)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.every_other_day,
+        next_run_at=old_next_run,
+    )
+    db_session.commit()
+
+    scheduler.enqueue_due_posts()
+
+    with SessionLocal() as db:
+        refreshed = db.get(Post, post.id)
+        assert as_aware(refreshed.next_run_at) == old_next_run + timedelta(days=2)
+
+
+def test_next_run_for_weekdays_skips_weekend(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    friday = datetime(2026, 6, 19, 8, 30, tzinfo=UTC)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.weekdays,
+        next_run_at=friday,
+    )
+
+    next_run = scheduler.next_run_after(post, friday + timedelta(minutes=1))
+
+    assert next_run == friday + timedelta(days=3)
+
+
+def test_next_run_for_custom_weekdays_uses_selected_days(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    monday = datetime(2026, 6, 22, 8, 30, tzinfo=UTC)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.custom_weekdays,
+        next_run_at=monday,
+    )
+    post.schedule_weekdays = "2,4"
+
+    next_run = scheduler.next_run_after(post, monday + timedelta(minutes=1))
+
+    assert next_run == monday + timedelta(days=2)
+
+
 def test_enqueue_ignores_future_paused_and_draft_posts(db_session) -> None:
     session = make_session(db_session, owner_id=111)
     chat = make_chat(db_session, session)

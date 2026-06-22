@@ -37,6 +37,10 @@ class ScheduleKind(str, enum.Enum):
     interval = "interval"
     daily = "daily"
     weekly = "weekly"
+    weekdays = "weekdays"
+    weekends = "weekends"
+    every_other_day = "every_other_day"
+    custom_weekdays = "custom_weekdays"
 
 
 class JobStatus(str, enum.Enum):
@@ -111,6 +115,7 @@ class Post(Base):
     )
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     interval_minutes: Mapped[int | None] = mapped_column(Integer)
+    schedule_weekdays: Mapped[str | None] = mapped_column(String(40))
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Tbilisi")
     session_strategy: Mapped[str] = mapped_column(String(40), default="fixed")
     default_session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))

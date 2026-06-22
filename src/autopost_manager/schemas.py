@@ -73,6 +73,7 @@ class PostCreate(BaseModel):
     schedule_kind: ScheduleKind = ScheduleKind.once
     next_run_at: datetime | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
+    schedule_weekdays: list[int] = Field(default_factory=list)
     timezone: str = "Asia/Tbilisi"
     session_strategy: str = "fixed"
     default_session_id: uuid.UUID | None = None
@@ -84,6 +85,7 @@ class PostScheduleUpdate(BaseModel):
     schedule_kind: ScheduleKind = ScheduleKind.once
     next_run_at: datetime | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
+    schedule_weekdays: list[int] = Field(default_factory=list)
     timezone: str = "Asia/Tbilisi"
     default_session_id: uuid.UUID
     target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -132,6 +134,7 @@ class PostOut(BaseModel):
     schedule_kind: ScheduleKind
     next_run_at: datetime | None
     interval_minutes: int | None
+    schedule_weekdays: list[int] = Field(default_factory=list)
     timezone: str
     session_strategy: str
     default_session_id: uuid.UUID | None

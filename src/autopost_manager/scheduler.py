@@ -10,6 +10,64 @@ from autopost_manager.db import SessionLocal, create_schema
 from autopost_manager.models import Post, PostStatus, PublishJob, ScheduleKind
 
 
+def as_aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def parse_weekdays(value: str | None) -> set[int]:
+    if not value:
+        return set()
+    days: set[int] = set()
+    for item in value.split(","):
+        try:
+            day = int(item)
+        except ValueError:
+            continue
+        if 0 <= day <= 6:
+            days.add(day)
+    return days
+
+
+def advance_by_days_until_future(start: datetime, now: datetime, days: int) -> datetime:
+    candidate = as_aware(start)
+    reference = as_aware(now)
+    while candidate <= reference:
+        candidate += timedelta(days=days)
+    return candidate
+
+
+def next_same_time_on_weekdays(start: datetime, now: datetime, weekdays: set[int]) -> datetime | None:
+    if not weekdays:
+        return None
+    candidate = as_aware(start)
+    reference = as_aware(now)
+    for _ in range(15):
+        candidate += timedelta(days=1)
+        if candidate > reference and candidate.weekday() in weekdays:
+            return candidate
+    return None
+
+
+def next_run_after(post: Post, now: datetime) -> datetime | None:
+    current = as_aware(post.next_run_at or now)
+
+    if post.schedule_kind == ScheduleKind.interval and post.interval_minutes:
+        return now + timedelta(minutes=post.interval_minutes)
+    if post.schedule_kind == ScheduleKind.daily:
+        return advance_by_days_until_future(current, now, 1)
+    if post.schedule_kind == ScheduleKind.weekly:
+        return advance_by_days_until_future(current, now, 7)
+    if post.schedule_kind == ScheduleKind.every_other_day:
+        return advance_by_days_until_future(current, now, 2)
+    if post.schedule_kind == ScheduleKind.weekdays:
+        return next_same_time_on_weekdays(current, now, {0, 1, 2, 3, 4})
+    if post.schedule_kind == ScheduleKind.weekends:
+        return next_same_time_on_weekdays(current, now, {5, 6})
+    if post.schedule_kind == ScheduleKind.custom_weekdays:
+        return next_same_time_on_weekdays(current, now, parse_weekdays(post.schedule_weekdays))
+    return None
+
+
 def enqueue_due_posts() -> int:
     now = datetime.now(UTC)
     created = 0
@@ -35,10 +93,10 @@ def enqueue_due_posts() -> int:
 
             if post.schedule_kind == ScheduleKind.once:
                 post.status = PostStatus.archived
-            elif post.schedule_kind == ScheduleKind.interval and post.interval_minutes:
-                post.next_run_at = now + timedelta(minutes=post.interval_minutes)
             else:
-                post.status = PostStatus.paused
+                post.next_run_at = next_run_after(post, now)
+                if not post.next_run_at:
+                    post.status = PostStatus.paused
         db.commit()
     return created
 
