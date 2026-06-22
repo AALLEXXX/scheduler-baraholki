@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: autopost
+      POSTGRES_USER: autopost
+      POSTGRES_PASSWORD: autopost
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autopost -d autopost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    command: ["autopost-api"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./miniapp:/app/miniapp:ro
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: ["autopost-bot"]
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: ["autopost-scheduler"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["autopost-worker"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+
+from autopost_manager.config import get_settings
+from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.models import JobStatus, PublishJob, SessionStatus, TelegramSession
+from autopost_manager.telegram_client import classify_send_error, send_message_from_session
+
+
+def choose_session(db, job: PublishJob) -> TelegramSession | None:
+    if job.session and job.session.status == SessionStatus.active:
+        return job.session
+    return db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.status == SessionStatus.active)
+        .order_by(TelegramSession.last_send_at.asc().nullsfirst())
+        .limit(1)
+    ).first()
+
+
+async def process_one_job() -> bool:
+    now = datetime.now(UTC)
+    with SessionLocal() as db:
+        job = db.scalars(
+            select(PublishJob)
+            .where(PublishJob.status == JobStatus.pending)
+            .where(PublishJob.due_at <= now)
+            .order_by(PublishJob.due_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).first()
+        if not job:
+            return False
+
+        job.status = JobStatus.processing
+        job.attempts += 1
+        db.commit()
+        db.refresh(job)
+
+        session = choose_session(db, job)
+        if not session:
+            job.status = JobStatus.failed
+            job.last_error = "No active session selected for job"
+            db.commit()
+            return True
+
+        try:
+            message_id = await send_message_from_session(
+                db=db,
+                session=session,
+                chat_id=job.target_chat.telegram_chat_id,
+                text=job.post.body,
+                parse_mode=job.post.parse_mode,
+            )
+        except Exception as exc:
+            job.status = JobStatus.failed
+            job.last_error = classify_send_error(exc, session)
+            db.commit()
+            return True
+
+        job.status = JobStatus.done
+        job.telegram_message_id = message_id
+        job.last_error = None
+        db.commit()
+        return True
+
+
+async def run_worker() -> None:
+    create_schema()
+    settings = get_settings()
+    while True:
+        processed = await process_one_job()
+        if not processed:
+            await asyncio.sleep(settings.worker_tick_seconds)
+
+
+def main() -> None:
+    asyncio.run(run_worker())
+
+
+if __name__ == "__main__":
+    main()

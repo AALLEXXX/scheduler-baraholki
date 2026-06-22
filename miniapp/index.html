@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autopost Manager</title>
+    <link rel="stylesheet" href="/miniapp/styles.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Autopost</h1>
+          <p id="status">Loading...</p>
+        </div>
+        <button id="refresh" type="button">Refresh</button>
+      </header>
+
+      <section class="grid">
+        <article>
+          <h2>Sessions</h2>
+          <div id="sessions" class="list"></div>
+        </article>
+
+        <article>
+          <h2>Chats</h2>
+          <div id="chats" class="list"></div>
+        </article>
+      </section>
+
+      <section>
+        <h2>New post</h2>
+        <form id="post-form">
+          <label>
+            Title
+            <input name="title" required maxlength="200" />
+          </label>
+          <label>
+            Text
+            <textarea name="body" required maxlength="4096"></textarea>
+          </label>
+          <label>
+            Next run
+            <input name="next_run_at" type="datetime-local" />
+          </label>
+          <label>
+            Interval minutes
+            <input name="interval_minutes" type="number" min="1" placeholder="empty for once" />
+          </label>
+          <label>
+            Session
+            <select name="default_session_id"></select>
+          </label>
+          <fieldset>
+            <legend>Targets</legend>
+            <div id="target-checkboxes" class="checks"></div>
+          </fieldset>
+          <button type="submit">Save post</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Posts</h2>
+        <div id="posts" class="list"></div>
+      </section>
+    </main>
+    <script src="/miniapp/app.js"></script>
+  </body>
+</html>
