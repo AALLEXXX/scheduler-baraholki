@@ -136,6 +136,8 @@ def make_post(
     source_bot_chat_id: int | None = None,
     source_bot_message_id: int | None = None,
     source_media_group_id: str | None = None,
+    ack_bot_chat_id: int | None = None,
+    ack_bot_message_id: int | None = None,
 ) -> Post:
     post = Post(
         title=body[:60],
@@ -152,6 +154,8 @@ def make_post(
         source_bot_chat_id=source_bot_chat_id,
         source_bot_message_id=source_bot_message_id,
         source_media_group_id=source_media_group_id,
+        ack_bot_chat_id=ack_bot_chat_id,
+        ack_bot_message_id=ack_bot_message_id,
     )
     db.add(post)
     db.flush()

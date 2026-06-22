@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiohttp
 from sqlalchemy.orm import Session
-from telethon import TelegramClient
+from telethon import TelegramClient, functions, types, utils
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 
 from autopost_manager.config import get_settings
@@ -222,10 +222,91 @@ async def delete_messages_from_session(
         try:
             if not await client.is_user_authorized():
                 raise RuntimeError("Telegram session needs login")
-            await client.delete_messages(peer, message_ids, revoke=True)
+            entity = await client.get_entity(peer)
+            await client.delete_messages(entity, message_ids, revoke=True)
         finally:
             await client.disconnect()
     return len(message_ids)
+
+
+def text_from_telegram_title(value) -> str:
+    if isinstance(value, str):
+        return value
+    text = getattr(value, "text", None)
+    if text:
+        return str(text)
+    return str(value)
+
+
+def peer_ids(values) -> set[int]:
+    ids: set[int] = set()
+    for value in values or []:
+        try:
+            ids.add(int(utils.get_peer_id(value)))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def folder_chat_ids(folder, dialogs: list[dict[str, object]]) -> list[int]:
+    include_ids = peer_ids(getattr(folder, "include_peers", [])) | peer_ids(
+        getattr(folder, "pinned_peers", [])
+    )
+    exclude_ids = peer_ids(getattr(folder, "exclude_peers", []))
+    dialog_ids = {int(dialog["telegram_chat_id"]) for dialog in dialogs}
+
+    if include_ids:
+        return sorted((include_ids & dialog_ids) - exclude_ids)
+
+    selected: set[int] = set()
+    include_groups = bool(getattr(folder, "groups", False))
+    include_broadcasts = bool(getattr(folder, "broadcasts", False))
+    for dialog in dialogs:
+        chat_id = int(dialog["telegram_chat_id"])
+        if include_groups and bool(dialog["is_group"]):
+            selected.add(chat_id)
+        if include_broadcasts and bool(dialog["is_channel"]) and not bool(dialog["is_group"]):
+            selected.add(chat_id)
+    return sorted(selected - exclude_ids)
+
+
+async def list_dialog_folders_from_session(session: TelegramSession) -> list[dict[str, object]]:
+    client = build_client(session)
+    dialogs: list[dict[str, object]] = []
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            raise RuntimeError("Telegram session needs login")
+
+        async for dialog in client.iter_dialogs(limit=300):
+            if not (dialog.is_group or dialog.is_channel):
+                continue
+            dialogs.append(
+                {
+                    "telegram_chat_id": int(dialog.id),
+                    "is_group": bool(dialog.is_group),
+                    "is_channel": bool(dialog.is_channel),
+                }
+            )
+
+        folders = await client(functions.messages.GetDialogFiltersRequest())
+        rows: list[dict[str, object]] = []
+        for folder in folders:
+            if not isinstance(folder, types.DialogFilter):
+                continue
+            chat_ids = folder_chat_ids(folder, dialogs)
+            if not chat_ids:
+                continue
+            rows.append(
+                {
+                    "id": int(folder.id),
+                    "title": text_from_telegram_title(folder.title),
+                    "telegram_chat_ids": chat_ids,
+                }
+            )
+        return rows
+    finally:
+        await client.disconnect()
 
 
 def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:

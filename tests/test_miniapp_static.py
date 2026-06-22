@@ -100,11 +100,22 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     js = read("app.js")
     css = read("styles.css")
 
-    for element_id in ["group-search", "group-picker", "group-pagination", "groups-prev", "groups-next"]:
+    for element_id in [
+        "group-search",
+        "folder-picker",
+        "group-picker",
+        "group-pagination",
+        "groups-prev",
+        "groups-next",
+    ]:
         assert f'id="{element_id}"' in html
         assert f"#{element_id}" in js
 
     assert "groupPageSize: 10" in js
+    assert "selectedFolderId" in js
+    assert 'api("folders")' in js
+    assert "function renderFolderPicker" in js
+    assert ".folder-chip" in css
     assert "function renderGroupPicker()" in js
     assert "selectedChatIds" in js
     assert ".pagination" in css

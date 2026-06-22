@@ -11,10 +11,12 @@ const state = {
   config: { bot_username: "scheduler_baraholki_bot" },
   sessions: [],
   chats: [],
+  folders: [],
   posts: [],
   pendingSessionId: null,
   selectedDraftId: null,
   selectedChatIds: new Set(),
+  selectedFolderId: "all",
   draftPage: 1,
   draftPageSize: 5,
   queuePage: 1,
@@ -96,9 +98,16 @@ function selectedGroups() {
 }
 
 function filteredChats() {
+  let chats = state.chats;
+  if (state.selectedFolderId !== "all") {
+    const folder = state.folders.find((item) => String(item.id) === state.selectedFolderId);
+    const folderChatIds = new Set((folder?.telegram_chat_ids || []).map((id) => Number(id)));
+    chats = chats.filter((chat) => folderChatIds.has(Number(chat.telegram_chat_id)));
+  }
+
   const query = state.groupSearch.trim().toLowerCase();
-  if (!query) return state.chats;
-  return state.chats.filter((chat) => chat.title.toLowerCase().includes(query));
+  if (!query) return chats;
+  return chats.filter((chat) => chat.title.toLowerCase().includes(query));
 }
 
 function pageCount(total, pageSize) {
@@ -186,7 +195,7 @@ function render() {
 
   document.querySelector("#posts-count").textContent = `${queued.length} постов`;
   document.querySelector("#drafts-count").textContent = `${drafts.length} постов`;
-  document.querySelector("#groups-count").textContent = `${state.chats.length} групп`;
+  document.querySelector("#groups-count").textContent = `${filteredChats().length} групп`;
 
   const stateDot = document.querySelector("#account-state");
   stateDot.className = `status-dot ${hasAccount ? "online" : ""}`;
@@ -207,7 +216,9 @@ function render() {
   const picker = document.querySelector("#group-picker");
   if (!hasGroups) {
     picker.replaceChildren(emptyChip(hasAccount ? "Группы пока не загружены" : "Нет подключенного аккаунта"));
+    document.querySelector("#folder-picker").replaceChildren();
   } else {
+    renderFolderPicker();
     renderGroupPicker();
   }
 
@@ -225,6 +236,29 @@ function render() {
     posts.replaceChildren(...pageSlice(queued, state.queuePage, state.queuePageSize).map(renderPost));
     renderQueuePagination(queued.length);
   }
+}
+
+function renderFolderPicker() {
+  const picker = document.querySelector("#folder-picker");
+  const items = [{ id: "all", title: "Все", telegram_chat_ids: state.chats.map((chat) => chat.telegram_chat_id) }, ...state.folders];
+  if (!items.some((folder) => String(folder.id) === state.selectedFolderId)) {
+    state.selectedFolderId = "all";
+  }
+
+  picker.replaceChildren(
+    ...items.map((folder) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `folder-chip ${String(folder.id) === state.selectedFolderId ? "selected" : ""}`.trim();
+      button.textContent = folder.title;
+      button.addEventListener("click", () => {
+        state.selectedFolderId = String(folder.id);
+        state.groupPage = 1;
+        render();
+      });
+      return button;
+    }),
+  );
 }
 
 function renderDraftPicker() {
@@ -398,16 +432,21 @@ function deletionMessage(result) {
 }
 
 async function load(options = {}) {
-  const [config, sessions, chats, posts] = await Promise.all([
+  const [config, sessions, chats, folders, posts] = await Promise.all([
     api("app-config"),
     api("sessions"),
     api("chats"),
+    api("folders"),
     api("posts"),
   ]);
   state.config = config;
   state.sessions = sessions;
   state.chats = chats;
+  state.folders = folders;
   state.posts = posts;
+  if (!state.folders.some((folder) => String(folder.id) === state.selectedFolderId)) {
+    state.selectedFolderId = "all";
+  }
   const availableIds = new Set(chats.map((chat) => chat.id));
   state.selectedChatIds = new Set([...state.selectedChatIds].filter((id) => availableIds.has(id)));
   render();
@@ -473,6 +512,7 @@ document.querySelector("#logout-account").addEventListener("click", async () => 
   try {
     await api("account/logout", { method: "POST" });
     state.selectedDraftId = null;
+    state.selectedFolderId = "all";
     state.selectedChatIds.clear();
     state.groupsSyncedOnInit = false;
     notify("Аккаунт отключен.");

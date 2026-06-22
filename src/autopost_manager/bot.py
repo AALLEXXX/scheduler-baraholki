@@ -168,6 +168,16 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
         return post, created
 
 
+def save_ack_message(post_id, ack_message: Message) -> None:
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if not post:
+            return
+        post.ack_bot_chat_id = ack_message.chat.id
+        post.ack_bot_message_id = ack_message.message_id
+        db.commit()
+
+
 async def save_draft(message: Message) -> None:
     if not message.from_user:
         return
@@ -178,10 +188,11 @@ async def save_draft(message: Message) -> None:
 
     post, created = save_message_as_draft(message)
     if created:
-        await message.answer(
+        ack_message = await message.answer(
             "Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание.",
             reply_markup=panel_keyboard(),
         )
+        save_ack_message(post.id, ack_message)
 
 
 async def run_bot() -> None:

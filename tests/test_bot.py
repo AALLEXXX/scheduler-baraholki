@@ -35,6 +35,7 @@ class FakeMessage:
 
     async def answer(self, text: str, reply_markup=None) -> None:
         self.answers.append((text, reply_markup))
+        return SimpleNamespace(chat=self.chat, message_id=self.message_id + 1000)
 
 
 def test_admin_only_requires_telegram_user() -> None:
@@ -164,3 +165,15 @@ def test_save_draft_ignores_commands() -> None:
 
     with SessionLocal() as db:
         assert db.query(Post).count() == 0
+
+
+def test_save_draft_stores_bot_ack_message_id() -> None:
+    message = FakeMessage(from_user=SimpleNamespace(id=111), text="Draft", message_id=30)
+
+    asyncio.run(bot_module.save_draft(message))
+
+    with SessionLocal() as db:
+        post = db.query(Post).one()
+        assert post.source_bot_message_id == 30
+        assert post.ack_bot_chat_id == 111
+        assert post.ack_bot_message_id == 1030

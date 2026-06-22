@@ -32,6 +32,7 @@ from autopost_manager.schemas import (
     AccountStartLogin,
     AppConfigOut,
     DeletePostOut,
+    DialogFolderOut,
     JobOut,
     PostCreate,
     PostMediaOut,
@@ -46,6 +47,7 @@ from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
     delete_messages_from_session,
+    list_dialog_folders_from_session,
     list_dialogs_from_session,
     request_login_code,
 )
@@ -96,6 +98,8 @@ def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
     refs: set[tuple[int, int]] = set()
     if post.source_bot_chat_id and post.source_bot_message_id:
         refs.add((post.source_bot_chat_id, post.source_bot_message_id))
+    if post.ack_bot_chat_id and post.ack_bot_message_id:
+        refs.add((post.ack_bot_chat_id, post.ack_bot_message_id))
     for media in post.media_items:
         refs.add((media.source_bot_chat_id, media.source_bot_message_id))
     return refs
@@ -142,9 +146,10 @@ async def delete_source_messages(
 
     result = BotMessageDeleteResult(attempted=len(message_ids))
     try:
+        bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
         result.deleted = await delete_messages_from_session(
             session=session,
-            peer=get_settings().bot_username,
+            peer=bot_peer,
             message_ids=message_ids,
         )
     except Exception as exc:
@@ -436,6 +441,50 @@ def list_chats(
             .order_by(TargetChat.title)
         )
     )
+
+
+@app.get("/api/folders", response_model=list[DialogFolderOut])
+async def list_folders(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[DialogFolderOut]:
+    session = db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+        .where(TelegramSession.status == SessionStatus.active)
+        .order_by(TelegramSession.updated_at.desc())
+    ).first()
+    if not session:
+        return []
+
+    try:
+        folders = await list_dialog_folders_from_session(session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    enabled_chat_ids = set(
+        db.scalars(
+            select(TargetChat.telegram_chat_id)
+            .where(TargetChat.owner_telegram_id == telegram_user_id)
+            .where(TargetChat.enabled.is_(True))
+        )
+    )
+    rows: list[DialogFolderOut] = []
+    for folder in folders:
+        chat_ids = [
+            int(chat_id)
+            for chat_id in folder["telegram_chat_ids"]
+            if int(chat_id) in enabled_chat_ids
+        ]
+        if chat_ids:
+            rows.append(
+                DialogFolderOut(
+                    id=int(folder["id"]),
+                    title=str(folder["title"]),
+                    telegram_chat_ids=chat_ids,
+                )
+            )
+    return rows
 
 
 @app.post("/api/chats", response_model=TargetChatOut)

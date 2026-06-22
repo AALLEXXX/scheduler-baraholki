@@ -528,6 +528,50 @@ def test_create_chat_validates_owner_and_duplicate(client, auth_user, db_session
     assert duplicate.status_code == 409
 
 
+def test_list_folders_filters_to_owned_enabled_chats(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    first = make_chat(db_session, session, title="First", telegram_chat_id=-1001)
+    second = make_chat(db_session, session, title="Second", telegram_chat_id=-1002)
+    disabled = make_chat(db_session, session, title="Disabled", telegram_chat_id=-1003, enabled=False)
+    other_session = make_session(db_session, owner_id=222)
+    make_chat(db_session, other_session, title="Other", telegram_chat_id=-1004)
+    db_session.commit()
+
+    async def fake_folders(_session):
+        return [
+            {
+                "id": 7,
+                "title": "Барахолки",
+                "telegram_chat_ids": [
+                    first.telegram_chat_id,
+                    second.telegram_chat_id,
+                    disabled.telegram_chat_id,
+                    -1004,
+                ],
+            },
+            {"id": 8, "title": "Пустая", "telegram_chat_ids": [-999]},
+        ]
+
+    monkeypatch.setattr(api_module, "list_dialog_folders_from_session", fake_folders)
+    auth_user(111)
+
+    response = client.get("/api/folders")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == [
+        {
+            "id": 7,
+            "title": "Барахолки",
+            "telegram_chat_ids": [first.telegram_chat_id, second.telegram_chat_id],
+        }
+    ]
+
+
 def test_create_post_requires_interval_session_and_group(client, auth_user, db_session) -> None:
     auth_user(111)
     session = make_session(db_session, owner_id=111)
@@ -646,6 +690,8 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
         chats=[chat],
         source_bot_chat_id=111,
         source_bot_message_id=40,
+        ack_bot_chat_id=111,
+        ack_bot_message_id=42,
     )
     make_media(db_session, post, source_bot_message_id=41)
     make_media(db_session, post, source_bot_message_id=40, order_index=1)
@@ -674,12 +720,12 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
     assert response.json() == {
         "ok": True,
         "deleted_jobs": 1,
-        "source_messages_found": 2,
-        "telegram_delete_attempted": 2,
-        "deleted_bot_messages": 2,
+        "source_messages_found": 3,
+        "telegram_delete_attempted": 3,
+        "deleted_bot_messages": 3,
         "telegram_delete_errors": [],
     }
-    assert calls == [{(111, 40), (111, 41)}]
+    assert calls == [{(111, 40), (111, 41), (111, 42)}]
 
     with SessionLocal() as db:
         assert db.get(Post, post.id) is None

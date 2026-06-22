@@ -61,6 +61,12 @@ class TargetChatOut(TargetChatCreate):
     model_config = {"from_attributes": True}
 
 
+class DialogFolderOut(BaseModel):
+    id: int
+    title: str
+    telegram_chat_ids: list[int] = Field(default_factory=list)
+
+
 class PostCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=4096)

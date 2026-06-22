@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from telethon import types
 from telethon.errors import FloodWaitError, SessionPasswordNeededError
 
 from autopost_manager import telegram_client
@@ -24,6 +25,7 @@ class AuthorizedClient:
         self.sent: list[tuple[int, str, str | None]] = []
         self.files: list[tuple[int, object, str | None, str | None]] = []
         self.deleted: list[tuple[str, list[int], bool]] = []
+        self.entity_requests: list[str] = []
 
     async def connect(self) -> None:
         self.connected = True
@@ -50,6 +52,10 @@ class AuthorizedClient:
 
     async def delete_messages(self, peer: str, message_ids: list[int], revoke: bool = True):
         self.deleted.append((peer, message_ids, revoke))
+
+    async def get_entity(self, peer: str):
+        self.entity_requests.append(peer)
+        return f"entity:{peer}"
 
 
 class UnauthorizedClient(AuthorizedClient):
@@ -284,13 +290,61 @@ def test_delete_messages_from_session_uses_user_session(monkeypatch, db_session)
     deleted = asyncio.run(
         telegram_client.delete_messages_from_session(
             session=session,
-            peer="scheduler_baraholki_bot",
+            peer="@scheduler_baraholki_bot",
             message_ids=[10, 11],
         )
     )
 
     assert deleted == 2
-    assert fake_client.deleted == [("scheduler_baraholki_bot", [10, 11], True)]
+    assert fake_client.entity_requests == ["@scheduler_baraholki_bot"]
+    assert fake_client.deleted == [("entity:@scheduler_baraholki_bot", [10, 11], True)]
+    assert fake_client.disconnected is True
+
+
+def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, db_session) -> None:
+    session = make_session(db_session)
+
+    class FolderClient(AuthorizedClient):
+        async def iter_dialogs(self, limit: int):
+            assert limit == 300
+            dialogs = [
+                SimpleNamespace(id=-1000000000123, is_group=True, is_channel=True),
+                SimpleNamespace(id=-1000000000456, is_group=True, is_channel=True),
+                SimpleNamespace(id=777, is_group=False, is_channel=False),
+            ]
+            for dialog in dialogs:
+                yield dialog
+
+        async def __call__(self, request):
+            assert request.__class__.__name__ == "GetDialogFiltersRequest"
+            return [
+                types.DialogFilterDefault(),
+                types.DialogFilter(
+                    id=4,
+                    title=types.TextWithEntities(text="Барахолки", entities=[]),
+                    pinned_peers=[],
+                    include_peers=[types.InputPeerChannel(123, 0)],
+                    exclude_peers=[],
+                ),
+                types.DialogFilter(
+                    id=5,
+                    title=types.TextWithEntities(text="Все группы", entities=[]),
+                    pinned_peers=[],
+                    include_peers=[],
+                    exclude_peers=[types.InputPeerChannel(456, 0)],
+                    groups=True,
+                ),
+            ]
+
+    fake_client = FolderClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    folders = asyncio.run(telegram_client.list_dialog_folders_from_session(session))
+
+    assert folders == [
+        {"id": 4, "title": "Барахолки", "telegram_chat_ids": [-1000000000123]},
+        {"id": 5, "title": "Все группы", "telegram_chat_ids": [-1000000000123]},
+    ]
     assert fake_client.disconnected is True
 
 

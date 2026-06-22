@@ -117,6 +117,8 @@ class Post(Base):
     source_bot_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     source_bot_message_id: Mapped[int | None] = mapped_column(BigInteger)
     source_media_group_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    ack_bot_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    ack_bot_message_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
