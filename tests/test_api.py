@@ -200,11 +200,7 @@ def test_start_login_creates_pending_session_without_real_telegram(
 
     response = client.post(
         "/api/account/start-login",
-        json={
-            "api_id": 38746276,
-            "api_hash": "187f6d7fa52fcce76690624ec5952ca2",
-            "phone": "+995000000000",
-        },
+        json={"phone": "+995000000000"},
     )
 
     assert response.status_code == 200, response.text
@@ -213,6 +209,8 @@ def test_start_login_creates_pending_session_without_real_telegram(
     with SessionLocal() as db:
         session = db.query(api_module.TelegramSession).one()
         assert session.owner_telegram_id == 111
+        assert session.api_id == 123456
+        assert session.api_hash == "0123456789abcdef0123456789abcdef"
         assert session.status == SessionStatus.code_needed
         assert session.phone_code_hash == "phone-code-hash"
 
@@ -234,11 +232,7 @@ def test_start_login_updates_existing_session_and_reports_send_error(
 
     response = client.post(
         "/api/account/start-login",
-        json={
-            "api_id": 111111,
-            "api_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "phone": "+995000000000",
-        },
+        json={"phone": "+995000000000"},
     )
 
     assert response.status_code == 200, response.text
@@ -246,8 +240,8 @@ def test_start_login_updates_existing_session_and_reports_send_error(
         sessions = db.query(api_module.TelegramSession).all()
         assert len(sessions) == 1
         assert sessions[0].id == existing.id
-        assert sessions[0].api_id == 111111
-        assert sessions[0].api_hash == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        assert sessions[0].api_id == 123456
+        assert sessions[0].api_hash == "0123456789abcdef0123456789abcdef"
         assert sessions[0].phone_code_hash == "updated-hash"
 
     async def failing_request_login_code(_session):
@@ -257,11 +251,7 @@ def test_start_login_updates_existing_session_and_reports_send_error(
 
     response = client.post(
         "/api/account/start-login",
-        json={
-            "api_id": 222222,
-            "api_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "phone": "+995111111111",
-        },
+        json={"phone": "+995111111111"},
     )
 
     assert response.status_code == 422

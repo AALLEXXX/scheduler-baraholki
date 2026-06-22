@@ -25,8 +25,6 @@ class AppConfigOut(BaseModel):
 
 
 class AccountStartLogin(BaseModel):
-    api_id: int = Field(gt=0)
-    api_hash: str = Field(min_length=16, max_length=160)
     phone: str = Field(min_length=5, max_length=40)
 
 

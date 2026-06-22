@@ -850,8 +850,6 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
     const result = await api("account/start-login", {
       method: "POST",
       body: JSON.stringify({
-        api_id: Number(form.get("api_id")),
-        api_hash: form.get("api_hash"),
         phone: form.get("phone"),
       }),
     });

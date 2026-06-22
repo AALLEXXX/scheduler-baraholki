@@ -306,8 +306,8 @@ async def start_account_login(
             owner_telegram_id=telegram_user_id,
             name=session_name,
             phone=payload.phone,
-            api_id=payload.api_id,
-            api_hash=payload.api_hash,
+            api_id=settings.telegram_api_id,
+            api_hash=settings.telegram_api_hash,
             session_path=session_path,
             status=SessionStatus.credentials_needed,
             min_send_interval_seconds=settings.default_min_send_interval_seconds,
@@ -315,8 +315,8 @@ async def start_account_login(
         db.add(session)
         db.flush()
     else:
-        session.api_id = payload.api_id
-        session.api_hash = payload.api_hash
+        session.api_id = settings.telegram_api_id
+        session.api_hash = settings.telegram_api_hash
         session.session_path = session.session_path or session_path
 
     try:

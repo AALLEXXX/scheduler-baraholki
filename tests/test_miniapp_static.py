@@ -35,6 +35,20 @@ def test_miniapp_removes_manual_account_selector_and_uses_connected_account() ->
     assert "const sessionId = connected[0]?.id;" in js
 
 
+def test_miniapp_login_only_asks_for_phone_number() -> None:
+    html = read("index.html")
+    js = read("app.js")
+
+    assert 'name="phone"' in html
+    assert 'name="api_id"' not in html
+    assert 'name="api_hash"' not in html
+    assert "API ID" not in html
+    assert "API Hash" not in html
+    assert "Введите номер телефона" in html
+    assert "api_id" not in js
+    assert "api_hash" not in js
+
+
 def test_miniapp_form_submit_keeps_form_reference_across_async_boundaries() -> None:
     js = read("app.js")
 
