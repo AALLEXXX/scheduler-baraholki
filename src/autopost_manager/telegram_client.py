@@ -45,12 +45,15 @@ async def send_message_from_session(
                 await asyncio.sleep(wait_seconds)
 
         client = build_client(session)
-        async with client:
+        await client.connect()
+        try:
             if not await client.is_user_authorized():
                 session.status = SessionStatus.needs_login
                 db.commit()
                 raise RuntimeError("Telegram session needs login")
             message = await client.send_message(chat_id, text, parse_mode=parse_mode)
+        finally:
+            await client.disconnect()
 
         session.last_send_at = datetime.now(UTC)
         session.status = SessionStatus.active
@@ -69,7 +72,8 @@ def classify_send_error(exc: Exception, session: TelegramSession | None = None) 
 async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, object]]:
     client = build_client(session)
     rows: list[dict[str, object]] = []
-    async with client:
+    await client.connect()
+    try:
         if not await client.is_user_authorized():
             raise RuntimeError("Telegram session needs login")
 
@@ -86,19 +90,25 @@ async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, 
                     "is_channel": bool(dialog.is_channel),
                 }
             )
+    finally:
+        await client.disconnect()
     return rows
 
 
 async def request_login_code(session: TelegramSession) -> str:
     client = build_client(session)
-    async with client:
+    await client.connect()
+    try:
         sent_code = await client.send_code_request(session.phone)
+    finally:
+        await client.disconnect()
     return sent_code.phone_code_hash
 
 
 async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool, object | None]:
     client = build_client(session)
-    async with client:
+    await client.connect()
+    try:
         try:
             await client.sign_in(
                 phone=session.phone,
@@ -109,10 +119,15 @@ async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool,
             return False, None
         me = await client.get_me()
         return True, me
+    finally:
+        await client.disconnect()
 
 
 async def confirm_login_password(session: TelegramSession, password: str) -> object:
     client = build_client(session)
-    async with client:
+    await client.connect()
+    try:
         await client.sign_in(password=password)
         return await client.get_me()
+    finally:
+        await client.disconnect()
