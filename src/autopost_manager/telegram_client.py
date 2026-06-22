@@ -158,17 +158,12 @@ async def send_files_with_optional_text(
     text: str,
     parse_mode: str | None,
 ):
-    caption = text if text and len(text) <= 1024 else None
-    sent = await client.send_file(
+    return await client.send_file(
         chat_id,
         files[0] if len(files) == 1 else files,
-        caption=caption,
+        caption=text or None,
         parse_mode=parse_mode,
     )
-    if text and not caption:
-        text_message = await client.send_message(chat_id, text, parse_mode=parse_mode)
-        return text_message
-    return sent
 
 
 def extract_sent_message_id(sent) -> int:

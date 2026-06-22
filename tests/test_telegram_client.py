@@ -194,7 +194,7 @@ def test_send_post_from_session_sends_media_with_caption(monkeypatch, db_session
     assert fake_client.sent == []
 
 
-def test_send_post_from_session_sends_album_and_long_text_separately(
+def test_send_post_from_session_sends_album_with_full_text_caption(
     monkeypatch,
     db_session,
 ) -> None:
@@ -224,8 +224,8 @@ def test_send_post_from_session_sends_album_and_long_text_separately(
     )
 
     assert message_id == 999
-    assert fake_client.files == [(-1001, ["first", "second"], None, "html")]
-    assert fake_client.sent == [(-1001, "x" * 1100, "html")]
+    assert fake_client.files == [(-1001, ["first", "second"], "x" * 1100, "html")]
+    assert fake_client.sent == []
 
 
 def test_send_media_from_session_downloads_temp_files_when_file_id_send_fails(
