@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
 
 
@@ -189,7 +190,7 @@ async def save_draft(message: Message) -> None:
     post, created = save_message_as_draft(message)
     if created:
         ack_message = await message.answer(
-            "Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание.",
+            POST_SAVED_ACK_TEXT,
             reply_markup=panel_keyboard(),
         )
         save_ack_message(post.id, ack_message)

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import create_schema, get_db
+from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import (
     Post,
     PostStatus,
@@ -130,8 +131,11 @@ async def delete_source_messages(
     telegram_user_id: int,
     refs: set[tuple[int, int]],
     db: Session,
+    match_texts: set[str] | None = None,
+    created_at=None,
+    media_count: int = 0,
 ) -> BotMessageDeleteResult:
-    if not refs:
+    if not refs and not match_texts and not media_count:
         return BotMessageDeleteResult()
 
     message_ids = sorted({message_id for _chat_id, message_id in refs})
@@ -151,7 +155,11 @@ async def delete_source_messages(
             session=session,
             peer=bot_peer,
             message_ids=message_ids,
+            match_texts=match_texts,
+            created_at=created_at,
+            media_count=media_count,
         )
+        result.attempted = max(result.attempted, result.deleted)
     except Exception as exc:
         result.errors.append(f"user session: {exc}")
 
@@ -615,6 +623,9 @@ async def delete_post(
         raise HTTPException(status_code=404, detail="Post not found")
 
     message_refs = collect_source_message_refs(post)
+    match_texts = {post.body, POST_SAVED_ACK_TEXT}
+    created_at = post.created_at
+    media_count = len(post.media_items)
     jobs = list(db.scalars(select(PublishJob).where(PublishJob.post_id == post.id)))
     for job in jobs:
         db.delete(job)
@@ -624,6 +635,9 @@ async def delete_post(
         telegram_user_id=telegram_user_id,
         refs=message_refs,
         db=db,
+        match_texts=match_texts,
+        created_at=created_at,
+        media_count=media_count,
     )
 
     return DeletePostOut(

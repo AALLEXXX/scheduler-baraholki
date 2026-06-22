@@ -57,6 +57,10 @@ class AuthorizedClient:
         self.entity_requests.append(peer)
         return f"entity:{peer}"
 
+    async def iter_messages(self, _entity, limit: int):
+        if False:
+            yield None
+
 
 class UnauthorizedClient(AuthorizedClient):
     async def is_user_authorized(self) -> bool:
@@ -299,6 +303,52 @@ def test_delete_messages_from_session_uses_user_session(monkeypatch, db_session)
     assert fake_client.entity_requests == ["@scheduler_baraholki_bot"]
     assert fake_client.deleted == [("entity:@scheduler_baraholki_bot", [10, 11], True)]
     assert fake_client.disconnected is True
+
+
+def test_delete_messages_from_session_matches_real_dialog_messages(
+    monkeypatch,
+    db_session,
+) -> None:
+    session = make_session(db_session)
+    created_at = datetime.now(UTC)
+
+    class MatchingClient(AuthorizedClient):
+        async def iter_messages(self, _entity, limit: int):
+            assert limit == 120
+            messages = [
+                SimpleNamespace(
+                    id=501,
+                    raw_text="Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание.",
+                    message=None,
+                    date=created_at,
+                    media=None,
+                ),
+                SimpleNamespace(
+                    id=500,
+                    raw_text="Bold text",
+                    message=None,
+                    date=created_at,
+                    media=None,
+                ),
+            ]
+            for message in messages:
+                yield message
+
+    fake_client = MatchingClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    deleted = asyncio.run(
+        telegram_client.delete_messages_from_session(
+            session=session,
+            peer="@scheduler_baraholki_bot",
+            message_ids=[10, 11],
+            match_texts={"<b>Bold text</b>", "Пост сохранён как черновик. Откройте панель, чтобы выбрать группы и расписание."},
+            created_at=created_at,
+        )
+    )
+
+    assert deleted == 2
+    assert fake_client.deleted == [("entity:@scheduler_baraholki_bot", [500, 501], True)]
 
 
 def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, db_session) -> None:

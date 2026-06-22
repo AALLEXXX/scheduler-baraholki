@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import tempfile
 from datetime import UTC, datetime
+from html import unescape
 from pathlib import Path
 
 import aiohttp
@@ -211,8 +213,11 @@ async def delete_messages_from_session(
     session: TelegramSession,
     peer: str,
     message_ids: list[int],
+    match_texts: set[str] | None = None,
+    created_at: datetime | None = None,
+    media_count: int = 0,
 ) -> int:
-    if not message_ids:
+    if not message_ids and not match_texts and not media_count:
         return 0
 
     lock = _lock_for(session.session_path)
@@ -223,10 +228,69 @@ async def delete_messages_from_session(
             if not await client.is_user_authorized():
                 raise RuntimeError("Telegram session needs login")
             entity = await client.get_entity(peer)
-            await client.delete_messages(entity, message_ids, revoke=True)
+            matched_ids = await find_dialog_message_ids(
+                client=client,
+                entity=entity,
+                match_texts=match_texts or set(),
+                created_at=created_at,
+                media_count=media_count,
+            )
+            ids_to_delete = matched_ids or set(message_ids)
+            await client.delete_messages(entity, sorted(ids_to_delete), revoke=True)
         finally:
             await client.disconnect()
-    return len(message_ids)
+    return len(ids_to_delete)
+
+
+def normalize_plain_text(value: str | None) -> str:
+    return " ".join(re.sub(r"<[^>]+>", "", unescape(value or "")).split())
+
+
+def near_datetime(value: datetime | None, reference: datetime | None, seconds: int = 1200) -> bool:
+    if not value or not reference:
+        return True
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=UTC)
+    return abs((value - reference).total_seconds()) <= seconds
+
+
+async def find_dialog_message_ids(
+    *,
+    client,
+    entity,
+    match_texts: set[str],
+    created_at: datetime | None,
+    media_count: int,
+) -> set[int]:
+    normalized_texts = {normalize_plain_text(text) for text in match_texts if normalize_plain_text(text)}
+    matched_ids: set[int] = set()
+    media_candidates: list[tuple[float, int]] = []
+
+    async for message in client.iter_messages(entity, limit=120):
+        if not near_datetime(getattr(message, "date", None), created_at):
+            continue
+
+        raw_text = normalize_plain_text(
+            getattr(message, "raw_text", None) or getattr(message, "message", None)
+        )
+        if raw_text and raw_text in normalized_texts:
+            matched_ids.add(int(message.id))
+
+        if media_count and getattr(message, "media", None):
+            distance = 0.0
+            message_date = getattr(message, "date", None)
+            if message_date and created_at:
+                if message_date.tzinfo is None:
+                    message_date = message_date.replace(tzinfo=UTC)
+                reference = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+                distance = abs((message_date - reference).total_seconds())
+            media_candidates.append((distance, int(message.id)))
+
+    for _distance, message_id in sorted(media_candidates)[:media_count]:
+        matched_ids.add(message_id)
+    return matched_ids
 
 
 def text_from_telegram_title(value) -> str:
