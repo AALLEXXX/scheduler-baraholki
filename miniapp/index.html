@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-7" />
+    <link rel="stylesheet" href="styles.css?v=20260623-8" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -26,7 +26,6 @@
           <strong id="account-subtitle">...</strong>
         </div>
         <div class="status-actions">
-          <button id="sync-groups" type="button" hidden>Обновить группы</button>
           <button id="logout-account" class="secondary-button" type="button" hidden>Выйти</button>
         </div>
       </section>
@@ -79,12 +78,13 @@
         </div>
 
         <form id="post-form" class="stack">
-          <div class="telegram-compose">
-            <div class="bot-open-block">
-              <button id="open-bot" type="button">Открыть бота и создать пост</button>
-              <p>Отправьте боту текст, фото или альбом — он появится здесь как черновик.</p>
-            </div>
-            <button id="refresh-drafts" class="secondary-button" type="button">Обновить посты</button>
+          <div class="draft-instruction">
+            <strong>Как добавить черновик</strong>
+            <p>
+              Отправьте готовый пост прямо в чат с этим ботом в Telegram: текст, фото,
+              видео или альбом. После этого нажмите кнопку обновления сверху, и пост
+              появится здесь как черновик.
+            </p>
           </div>
 
           <div>
@@ -159,12 +159,12 @@
 
       <div id="edit-modal" class="modal-backdrop" hidden>
         <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+          <button id="edit-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
           <div class="panel-heading compact">
             <div>
               <p class="eyebrow">Редактирование</p>
               <h2 id="edit-title">Запланированный пост</h2>
             </div>
-            <button id="edit-close" class="secondary-button compact-button" type="button">Закрыть</button>
           </div>
 
           <form id="edit-form" class="stack">
@@ -215,6 +215,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260623-7"></script>
+    <script src="app.js?v=20260623-8"></script>
   </body>
 </html>

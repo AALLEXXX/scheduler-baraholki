@@ -95,6 +95,7 @@ async function api(path, options = {}) {
 }
 
 function setBusy(button, busy, text) {
+  if (!button) return;
   button.disabled = busy;
   if (text) button.textContent = text;
 }
@@ -114,7 +115,21 @@ function folderItems() {
   ];
 }
 
-function filteredChats({ folderId = state.selectedFolderId, query = state.groupSearch } = {}) {
+function sortSelectedFirst(chats, selectedIds) {
+  if (!selectedIds?.size) return chats;
+  return [...chats].sort((left, right) => {
+    const leftSelected = selectedIds.has(left.id);
+    const rightSelected = selectedIds.has(right.id);
+    if (leftSelected === rightSelected) return 0;
+    return leftSelected ? -1 : 1;
+  });
+}
+
+function filteredChats({
+  folderId = state.selectedFolderId,
+  query = state.groupSearch,
+  selectedIds = state.selectedChatIds,
+} = {}) {
   let chats = state.chats;
   if (folderId !== "all") {
     const folder = state.folders.find((item) => String(item.id) === folderId);
@@ -123,8 +138,10 @@ function filteredChats({ folderId = state.selectedFolderId, query = state.groupS
   }
 
   const cleanQuery = query.trim().toLowerCase();
-  if (!cleanQuery) return chats;
-  return chats.filter((chat) => chat.title.toLowerCase().includes(cleanQuery));
+  if (cleanQuery) {
+    chats = chats.filter((chat) => chat.title.toLowerCase().includes(cleanQuery));
+  }
+  return sortSelectedFirst(chats, selectedIds);
 }
 
 function pageCount(total, pageSize) {
@@ -151,6 +168,7 @@ function clampEditGroupPage() {
   const total = filteredChats({
     folderId: state.editSelectedFolderId,
     query: state.editGroupSearch,
+    selectedIds: state.editSelectedChatIds,
   }).length;
   const pages = pageCount(total, state.editGroupPageSize);
   state.editGroupPage = clampPage(state.editGroupPage, total, state.editGroupPageSize);
@@ -217,37 +235,6 @@ function mediaLabel(post) {
   if (!count) return "без медиа";
   if (count === 1) return "1 медиа";
   return `${count} медиа`;
-}
-
-function botUsername() {
-  return (state.config.bot_username || "scheduler_baraholki_bot").replace(/^@/, "").trim();
-}
-
-function openTelegramBot() {
-  const username = botUsername();
-  const webUrl = `https://t.me/${encodeURIComponent(username)}`;
-  const appUrl = `tg://resolve?domain=${encodeURIComponent(username)}`;
-
-  try {
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(webUrl);
-      window.setTimeout(() => {
-        window.location.href = appUrl;
-      }, 450);
-      return;
-    }
-  } catch {
-    // Fall back below.
-  }
-
-  try {
-    window.location.href = appUrl;
-    window.setTimeout(() => {
-      window.location.href = webUrl;
-    }, 300);
-  } catch {
-    window.location.href = webUrl;
-  }
 }
 
 async function confirmSpamRiskIfNeeded(intervalMinutes) {
@@ -325,7 +312,6 @@ function render() {
     : "Подключите Telegram-аккаунт для отправки";
 
   document.querySelector("#connect-panel").hidden = hasAccount;
-  document.querySelector("#sync-groups").hidden = !hasAccount;
   document.querySelector("#logout-account").hidden = !hasAccount;
   document.querySelector("#compose-hint").textContent = hasAccount
     ? hasGroups
@@ -479,6 +465,8 @@ function renderGroupPicker() {
           } else {
             state.selectedChatIds.delete(chat.id);
           }
+          state.groupPage = 1;
+          renderGroupPicker();
         });
         label.querySelector("span").textContent = chat.title;
         return label;
@@ -575,6 +563,7 @@ function renderEditGroupPicker() {
   const chats = filteredChats({
     folderId: state.editSelectedFolderId,
     query: state.editGroupSearch,
+    selectedIds: state.editSelectedChatIds,
   });
   const pages = clampEditGroupPage();
   const start = (state.editGroupPage - 1) * state.editGroupPageSize;
@@ -598,6 +587,8 @@ function renderEditGroupPicker() {
           } else {
             state.editSelectedChatIds.delete(chat.id);
           }
+          state.editGroupPage = 1;
+          renderEditGroupPicker();
         });
         label.querySelector("span").textContent = chat.title;
         return label;
@@ -700,17 +691,13 @@ async function syncGroups(options = {}) {
     notify("Сначала подключите аккаунт.", "error");
     return;
   }
-  const button = document.querySelector("#sync-groups");
   if (!options.silent) clearNotice();
-  setBusy(button, true, "Обновляем...");
   try {
     const result = await api(`sessions/${session.id}/sync-chats`, { method: "POST" });
     if (!options.silent) notify(`Группы обновлены: ${result.total_dialogs}`);
     await load();
   } catch (error) {
     if (!options.silent) notify(error.message, "error");
-  } finally {
-    setBusy(button, false, "Обновить группы");
   }
 }
 
@@ -763,8 +750,6 @@ document.querySelector("#refresh").addEventListener("click", () => {
   load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));
 });
 
-document.querySelector("#sync-groups").addEventListener("click", syncGroups);
-
 document.querySelector("#logout-account").addEventListener("click", async () => {
   clearNotice();
   const confirmed = window.confirm("Выйти из подключенного Telegram-аккаунта?");
@@ -784,13 +769,6 @@ document.querySelector("#logout-account").addEventListener("click", async () => 
   } finally {
     setBusy(button, false, "Выйти");
   }
-});
-
-document.querySelector("#open-bot").addEventListener("click", openTelegramBot);
-
-document.querySelector("#refresh-drafts").addEventListener("click", () => {
-  clearNotice();
-  load().catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#post-form select[name=schedule_kind]").addEventListener("change", (event) => {

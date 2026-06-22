@@ -227,22 +227,28 @@ button:disabled {
   gap: 12px;
 }
 
-.telegram-compose {
+.draft-instruction {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
+  border: 1px solid rgba(36, 129, 204, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+  background:
+    linear-gradient(135deg, rgba(36, 129, 204, 0.12), rgba(24, 160, 88, 0.08)),
+    color-mix(in srgb, var(--surface-strong) 92%, transparent);
 }
 
-.bot-open-block {
-  display: grid;
-  gap: 7px;
+.draft-instruction strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 850;
 }
 
-.bot-open-block p {
+.draft-instruction p {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
 .form-grid {
@@ -254,6 +260,7 @@ button:disabled {
 label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
@@ -263,6 +270,8 @@ input,
 select,
 textarea {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -270,6 +279,15 @@ textarea {
   background: color-mix(in srgb, var(--surface-strong) 94%, var(--text) 6%);
   color: var(--text);
   outline: none;
+}
+
+input[type="datetime-local"] {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 input:focus,
@@ -529,6 +547,7 @@ textarea {
 }
 
 .modal-card {
+  position: relative;
   width: min(100%, 760px);
   max-height: min(88vh, 820px);
   overflow: auto;
@@ -539,6 +558,24 @@ textarea {
     linear-gradient(135deg, rgba(36, 129, 204, 0.12), rgba(24, 160, 88, 0.08)),
     var(--surface);
   box-shadow: var(--shadow);
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0;
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1;
 }
 
 .edit-preview {
@@ -558,8 +595,7 @@ textarea {
   }
 
   .form-grid,
-  .panel-heading,
-  .telegram-compose {
+  .panel-heading {
     grid-template-columns: 1fr;
     display: grid;
   }

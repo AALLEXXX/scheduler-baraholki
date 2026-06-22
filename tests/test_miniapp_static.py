@@ -46,18 +46,26 @@ def test_miniapp_form_submit_keeps_form_reference_across_async_boundaries() -> N
 def test_miniapp_uses_telegram_drafts_instead_of_free_text_composer() -> None:
     html = read("index.html")
     js = read("app.js")
+    css = read("styles.css")
 
     assert 'id="draft-picker"' in html
-    assert 'id="open-bot"' in html
-    assert "Открыть бота и создать пост" in html
-    assert "он появится здесь как черновик" in html
-    assert 'id="refresh-drafts"' in html
+    assert 'id="open-bot"' not in html
+    assert 'id="refresh-drafts"' not in html
+    assert 'id="sync-groups"' not in html
+    assert "Открыть бота и создать пост" not in html
+    assert "появится здесь как черновик" in html
+    assert "Отправьте готовый пост прямо в чат" in html
+    assert "draft-instruction" in html
     assert 'textarea name="body"' not in html
     assert "selectedDraftId" in js
     assert 'api(`posts/${draftId}/schedule`' in js
     assert "Отправьте пост боту" in js
-    assert "openTelegramBot" in js
-    assert "tg://resolve" in js
+    assert "openTelegramBot" not in js
+    assert "tg://resolve" not in js
+    assert "#open-bot" not in js
+    assert "#refresh-drafts" not in js
+    assert "#sync-groups" not in js
+    assert ".draft-instruction" in css
 
 
 def test_miniapp_can_paginate_and_delete_posts() -> None:
@@ -120,6 +128,8 @@ def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
     assert ".post-meta" in css
     assert ".post-item.scheduled" in css
     assert ".modal-backdrop" in css
+    assert ".modal-close" in css
+    assert 'id="edit-close" class="modal-close"' in html
 
 
 def test_miniapp_auto_syncs_groups_and_can_logout_account() -> None:
@@ -156,8 +166,21 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert ".folder-chip" in css
     assert "function renderGroupPicker()" in js
     assert "selectedChatIds" in js
+    assert "sortSelectedFirst" in js
+    assert "selectedIds = state.selectedChatIds" in js
+    assert "selectedIds: state.editSelectedChatIds" in js
     assert ".pagination" in css
     assert "[hidden]" in css
+
+
+def test_miniapp_datetime_inputs_are_constrained_on_mobile() -> None:
+    html = read("index.html")
+    css = read("styles.css")
+
+    assert 'type="datetime-local"' in html
+    assert 'input[type="datetime-local"]' in css
+    assert "max-width: 100%" in css
+    assert "-webkit-appearance: none" in css
 
 
 def test_miniapp_spam_guard_is_visible_in_ui_and_payload() -> None:
