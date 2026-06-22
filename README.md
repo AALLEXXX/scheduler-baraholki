@@ -23,6 +23,17 @@ Open the Mini App through the Telegram bot in production. For local API checks:
 curl http://localhost:8000/health
 ```
 
+## Tests
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest --cov=autopost_manager --cov-report=term-missing
+```
+
+The test suite uses SQLite under `/tmp` and mocks Telegram/Telethon calls, so it does not need
+real Telegram credentials or a local Postgres instance.
+
 ## Session login
 
 Each Telegram user account gets a separate Telethon session.

@@ -24,6 +24,9 @@ def create_schema() -> None:
 
 
 def ensure_runtime_columns() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+
     statements = [
         "ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'credentials_needed'",
         "ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'code_needed'",

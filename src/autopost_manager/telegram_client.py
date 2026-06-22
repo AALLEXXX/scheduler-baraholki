@@ -33,7 +33,6 @@ async def send_message_from_session(
     text: str,
     parse_mode: str | None,
 ) -> int:
-    settings = get_settings()
     lock = _lock_for(session.session_path)
 
     async with lock:

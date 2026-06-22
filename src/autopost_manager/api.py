@@ -14,6 +14,7 @@ from autopost_manager.models import (
     PostStatus,
     PostTarget,
     PublishJob,
+    ScheduleKind,
     SessionStatus,
     TargetChat,
     TargetChatType,
@@ -56,6 +57,11 @@ if miniapp_dir.exists():
 @app.get("/health")
 def health() -> dict[str, object]:
     return {"ok": True, "env": get_settings().app_env}
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, object]:
+    return health()
 
 
 @app.get("/api/sessions", response_model=list[TelegramSessionOut])
