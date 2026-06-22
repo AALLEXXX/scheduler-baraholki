@@ -45,6 +45,7 @@ from autopost_manager.security import require_user
 from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
+    delete_messages_from_session,
     list_dialogs_from_session,
     request_login_code,
 )
@@ -117,6 +118,44 @@ async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteRes
             result.deleted += 1
     finally:
         await bot.session.close()
+    return result
+
+
+async def delete_source_messages(
+    *,
+    telegram_user_id: int,
+    refs: set[tuple[int, int]],
+    db: Session,
+) -> BotMessageDeleteResult:
+    if not refs:
+        return BotMessageDeleteResult()
+
+    message_ids = sorted({message_id for _chat_id, message_id in refs})
+    session = db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+        .where(TelegramSession.status == SessionStatus.active)
+        .order_by(TelegramSession.updated_at.desc())
+    ).first()
+    if not session:
+        return await delete_bot_messages(refs)
+
+    result = BotMessageDeleteResult(attempted=len(message_ids))
+    try:
+        result.deleted = await delete_messages_from_session(
+            session=session,
+            peer=get_settings().bot_username,
+            message_ids=message_ids,
+        )
+    except Exception as exc:
+        result.errors.append(f"user session: {exc}")
+
+    if result.deleted == 0:
+        fallback = await delete_bot_messages(refs)
+        result.attempted += fallback.attempted
+        result.deleted += fallback.deleted
+        result.errors.extend(fallback.errors)
+
     return result
 
 
@@ -532,7 +571,11 @@ async def delete_post(
         db.delete(job)
     db.delete(post)
     db.commit()
-    telegram_delete = await delete_bot_messages(message_refs)
+    telegram_delete = await delete_source_messages(
+        telegram_user_id=telegram_user_id,
+        refs=message_refs,
+        db=db,
+    )
 
     return DeletePostOut(
         ok=True,

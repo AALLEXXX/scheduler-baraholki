@@ -654,11 +654,18 @@ def test_delete_post_removes_queue_rows_and_source_bot_messages(
 
     calls: list[set[tuple[int, int]]] = []
 
-    async def fake_delete_bot_messages(refs: set[tuple[int, int]]) -> api_module.BotMessageDeleteResult:
+    async def fake_delete_source_messages(
+        *,
+        telegram_user_id: int,
+        refs: set[tuple[int, int]],
+        db,
+    ) -> api_module.BotMessageDeleteResult:
+        assert telegram_user_id == 111
+        assert db is not None
         calls.append(refs)
         return api_module.BotMessageDeleteResult(attempted=len(refs), deleted=len(refs))
 
-    monkeypatch.setattr(api_module, "delete_bot_messages", fake_delete_bot_messages)
+    monkeypatch.setattr(api_module, "delete_source_messages", fake_delete_source_messages)
     auth_user(111)
 
     response = client.delete(f"/api/posts/{post.id}")
@@ -689,12 +696,18 @@ def test_delete_post_is_scoped_to_owner(client, auth_user, db_session, monkeypat
     )
     db_session.commit()
 
-    async def fail_delete_bot_messages(
-        _refs: set[tuple[int, int]],
+    async def fail_delete_source_messages(
+        *,
+        telegram_user_id: int,
+        refs: set[tuple[int, int]],
+        db,
     ) -> api_module.BotMessageDeleteResult:
+        assert telegram_user_id == 111
+        assert refs
+        assert db is not None
         raise AssertionError("foreign post should not reach Telegram delete")
 
-    monkeypatch.setattr(api_module, "delete_bot_messages", fail_delete_bot_messages)
+    monkeypatch.setattr(api_module, "delete_source_messages", fail_delete_source_messages)
     auth_user(111)
 
     response = client.delete(f"/api/posts/{post.id}")
@@ -736,6 +749,40 @@ def test_delete_bot_messages_is_best_effort_and_closes_session(monkeypatch) -> N
     assert ("delete", 100, 1) in calls
     assert ("delete", 100, 2) in calls
     assert calls[-1] == ("close", "session", None)
+
+
+def test_delete_source_messages_prefers_user_session_and_falls_back_to_bot(
+    db_session,
+    monkeypatch,
+) -> None:
+    make_session(db_session, owner_id=111)
+    db_session.commit()
+
+    calls: list[str] = []
+
+    async def failing_user_delete(**_kwargs):
+        calls.append("user")
+        raise RuntimeError("user session refused")
+
+    async def successful_bot_delete(refs: set[tuple[int, int]]) -> api_module.BotMessageDeleteResult:
+        calls.append("bot")
+        return api_module.BotMessageDeleteResult(attempted=len(refs), deleted=len(refs))
+
+    monkeypatch.setattr(api_module, "delete_messages_from_session", failing_user_delete)
+    monkeypatch.setattr(api_module, "delete_bot_messages", successful_bot_delete)
+
+    result = asyncio.run(
+        api_module.delete_source_messages(
+            telegram_user_id=111,
+            refs={(111, 10), (111, 11)},
+            db=db_session,
+        )
+    )
+
+    assert result.attempted == 4
+    assert result.deleted == 2
+    assert "user session refused" in result.errors[0]
+    assert calls == ["user", "bot"]
 
 
 def test_enqueue_now_and_jobs_are_scoped_to_owner(client, auth_user, db_session) -> None:

@@ -207,6 +207,27 @@ async def download_bot_file(file_id: str, media_type: str) -> str:
     return temp_path
 
 
+async def delete_messages_from_session(
+    session: TelegramSession,
+    peer: str,
+    message_ids: list[int],
+) -> int:
+    if not message_ids:
+        return 0
+
+    lock = _lock_for(session.session_path)
+    async with lock:
+        client = build_client(session)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telegram session needs login")
+            await client.delete_messages(peer, message_ids, revoke=True)
+        finally:
+            await client.disconnect()
+    return len(message_ids)
+
+
 def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:
     if isinstance(exc, FloodWaitError):
         if session:

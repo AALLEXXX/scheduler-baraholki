@@ -23,6 +23,7 @@ class AuthorizedClient:
         self.disconnected = False
         self.sent: list[tuple[int, str, str | None]] = []
         self.files: list[tuple[int, object, str | None, str | None]] = []
+        self.deleted: list[tuple[str, list[int], bool]] = []
 
     async def connect(self) -> None:
         self.connected = True
@@ -46,6 +47,9 @@ class AuthorizedClient:
     ):
         self.files.append((chat_id, file, caption, parse_mode))
         return FakeMessage()
+
+    async def delete_messages(self, peer: str, message_ids: list[int], revoke: bool = True):
+        self.deleted.append((peer, message_ids, revoke))
 
 
 class UnauthorizedClient(AuthorizedClient):
@@ -270,6 +274,24 @@ def test_classify_send_error_marks_flood_wait_session_limited(db_session) -> Non
 
 def test_classify_send_error_formats_generic_exception() -> None:
     assert telegram_client.classify_send_error(RuntimeError("boom")) == "RuntimeError: boom"
+
+
+def test_delete_messages_from_session_uses_user_session(monkeypatch, db_session) -> None:
+    session = make_session(db_session)
+    fake_client = AuthorizedClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    deleted = asyncio.run(
+        telegram_client.delete_messages_from_session(
+            session=session,
+            peer="scheduler_baraholki_bot",
+            message_ids=[10, 11],
+        )
+    )
+
+    assert deleted == 2
+    assert fake_client.deleted == [("scheduler_baraholki_bot", [10, 11], True)]
+    assert fake_client.disconnected is True
 
 
 def test_list_dialogs_filters_groups_and_channels(monkeypatch, db_session) -> None:
