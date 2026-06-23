@@ -22,6 +22,7 @@ from telethon.errors import (
     PhoneNumberFloodError,
     PhoneNumberInvalidError,
     PhonePasswordFloodError,
+    SendCodeUnavailableError,
 )
 
 from autopost_manager.config import get_settings
@@ -91,6 +92,8 @@ def login_error_detail(stage: str, exc: Exception) -> str:
         return "Telegram не принял код. Проверьте код и попробуйте ещё раз."
     if isinstance(exc, PhoneCodeExpiredError):
         return "Код Telegram истёк. Нажмите «Получить код» ещё раз."
+    if isinstance(exc, SendCodeUnavailableError):
+        return "Telegram не даёт отправить SMS для этого номера сейчас. Проверьте код в Telegram-приложении или попробуйте позже."
     if isinstance(exc, PasswordHashInvalidError):
         return "Telegram не принял пароль 2FA. Нужен облачный пароль из настроек Telegram, не код из сообщения."
     prefix = {

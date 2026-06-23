@@ -131,6 +131,22 @@ function startSmsCooldown(seconds = 90) {
   smsCooldownTimer = window.setInterval(tick, 1000);
 }
 
+function updateSmsButtonFromLoginResult(result) {
+  const button = document.querySelector("#resend-sms-code");
+  if (!button) return;
+  if (smsCooldownTimer) {
+    window.clearInterval(smsCooldownTimer);
+    smsCooldownTimer = null;
+  }
+
+  if (result?.next_delivery_type) {
+    setBusy(button, false, "Отправить SMS");
+    return;
+  }
+
+  setBusy(button, true, "SMS недоступна");
+}
+
 function selectedGroups() {
   return [...state.selectedChatIds];
 }
@@ -1080,6 +1096,7 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
     state.pendingPhone = String(form.get("phone") || "");
     document.querySelector("#login-form").hidden = true;
     document.querySelector("#code-form").hidden = false;
+    updateSmsButtonFromLoginResult(result);
     notify(result.message || "Код отправлен в Telegram.");
   } catch (error) {
     notify(error.message, "error");
@@ -1110,6 +1127,7 @@ document.querySelector("#resend-sms-code").addEventListener("click", async (even
     state.pendingSessionId = result.session_id;
     state.pendingPhone = String(phone);
     shouldStartCooldown = true;
+    updateSmsButtonFromLoginResult(result);
     notify(result.message || "SMS-код запрошен.");
   } catch (error) {
     notify(error.message, "error");
