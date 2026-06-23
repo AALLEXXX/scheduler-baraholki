@@ -149,7 +149,13 @@ function updateSmsButtonFromLoginResult(result) {
 
 function loginPhoneFromForm(form) {
   const countryCode = String(form.get("country_code") || "").replace(/[^\d+]/g, "");
-  const localPhone = String(form.get("phone_local") || "").replace(/[^\d]/g, "");
+  const rawLocalPhone = String(form.get("phone_local") || "").trim();
+  const fullPhone = rawLocalPhone.replace(/[^\d+]/g, "");
+  if (fullPhone.startsWith("+")) {
+    return fullPhone;
+  }
+
+  const localPhone = rawLocalPhone.replace(/[^\d]/g, "");
   if (!countryCode || !localPhone) {
     return "";
   }

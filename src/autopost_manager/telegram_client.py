@@ -615,12 +615,7 @@ async def request_login_code(session: TelegramSession, *, force_sms: bool = Fals
         client = build_client(session)
         await client.connect()
         try:
-            if force_sms and session.phone_code_hash:
-                sent_code = await client(
-                    functions.auth.ResendCodeRequest(session.phone, session.phone_code_hash)
-                )
-            else:
-                sent_code = await client.send_code_request(session.phone)
+            sent_code = await client.send_code_request(session.phone, force_sms=force_sms)
         finally:
             remember_client_session(session, client)
             await client.disconnect()
@@ -658,7 +653,7 @@ async def confirm_login_password(session: TelegramSession, password: str) -> obj
         client = build_client(session)
         await client.connect()
         try:
-            await client.sign_in(phone=session.phone, password=password)
+            await client.sign_in(password=password)
             return await client.get_me()
         finally:
             remember_client_session(session, client)
