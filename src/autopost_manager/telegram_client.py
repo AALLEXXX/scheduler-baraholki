@@ -5,6 +5,7 @@ import fcntl
 import re
 import tempfile
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import unescape
 from pathlib import Path
@@ -19,6 +20,14 @@ from autopost_manager.config import get_settings
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
 
 _locks: dict[str, asyncio.Lock] = {}
+
+
+@dataclass(frozen=True)
+class LoginCodeRequest:
+    phone_code_hash: str
+    delivery_type: str
+    next_delivery_type: str | None = None
+    timeout: int | None = None
 
 
 def _lock_for(session_path: str) -> asyncio.Lock:
@@ -601,16 +610,22 @@ async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, 
         return rows
 
 
-async def request_login_code(session: TelegramSession) -> str:
+async def request_login_code(session: TelegramSession, *, force_sms: bool = False) -> LoginCodeRequest:
     async with session_lock(session.session_path):
         client = build_client(session)
         await client.connect()
         try:
-            sent_code = await client.send_code_request(session.phone)
+            sent_code = await client.send_code_request(session.phone, force_sms=force_sms)
         finally:
             remember_client_session(session, client)
             await client.disconnect()
-        return sent_code.phone_code_hash
+        next_type = getattr(sent_code, "next_type", None)
+        return LoginCodeRequest(
+            phone_code_hash=sent_code.phone_code_hash,
+            delivery_type=type(sent_code.type).__name__,
+            next_delivery_type=type(next_type).__name__ if next_type else None,
+            timeout=getattr(sent_code, "timeout", None),
+        )
 
 
 async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool, object | None]:

@@ -375,6 +375,13 @@ textarea {
   -webkit-text-fill-color: var(--text);
 }
 
+.login-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 input[type="datetime-local"] {
   display: block;
   min-width: 0;
@@ -829,6 +836,7 @@ textarea {
   }
 
   .form-grid,
+  .login-action-row,
   .panel-heading {
     grid-template-columns: 1fr;
     display: grid;

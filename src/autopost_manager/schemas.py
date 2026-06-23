@@ -26,6 +26,7 @@ class AppConfigOut(BaseModel):
 
 class AccountStartLogin(BaseModel):
     phone: str = Field(min_length=5, max_length=40)
+    force_sms: bool = False
 
 
 class AccountCodeConfirm(BaseModel):
@@ -42,6 +43,8 @@ class AccountLoginOut(BaseModel):
     session_id: uuid.UUID
     status: SessionStatus
     message: str
+    delivery_type: str | None = None
+    next_delivery_type: str | None = None
 
 
 class TargetChatCreate(BaseModel):

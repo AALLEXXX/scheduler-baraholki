@@ -86,9 +86,15 @@ class LoginClient(AuthorizedClient):
         self.password_needed = password_needed
         self.sign_ins: list[dict[str, object]] = []
 
-    async def send_code_request(self, phone: str):
+    async def send_code_request(self, phone: str, *, force_sms: bool = False):
         self.phone = phone
-        return SimpleNamespace(phone_code_hash="sent-code-hash")
+        self.force_sms = force_sms
+        return SimpleNamespace(
+            phone_code_hash="sent-code-hash",
+            type=SimpleNamespace(),
+            next_type=None,
+            timeout=60,
+        )
 
     async def sign_in(self, **kwargs):
         self.sign_ins.append(kwargs)
@@ -602,10 +608,13 @@ def test_request_login_code_uses_client_and_disconnects(monkeypatch, db_session)
     fake_client = LoginClient()
     monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
 
-    code_hash = asyncio.run(telegram_client.request_login_code(session))
+    code_request = asyncio.run(telegram_client.request_login_code(session, force_sms=True))
 
-    assert code_hash == "sent-code-hash"
+    assert code_request.phone_code_hash == "sent-code-hash"
+    assert code_request.delivery_type == "SimpleNamespace"
+    assert code_request.timeout == 60
     assert fake_client.phone == "+123"
+    assert fake_client.force_sms is True
     assert fake_client.disconnected is True
 
 

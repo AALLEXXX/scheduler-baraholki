@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from telethon.errors import PasswordHashInvalidError
 
@@ -231,9 +232,15 @@ def test_start_login_creates_pending_session_without_real_telegram(
 ) -> None:
     auth_user(111)
 
-    async def fake_request_login_code(session):
+    async def fake_request_login_code(session, *, force_sms=False):
         assert session.phone == "+995000000000"
-        return "phone-code-hash"
+        assert force_sms is False
+        return SimpleNamespace(
+            phone_code_hash="phone-code-hash",
+            delivery_type="SentCodeTypeApp",
+            next_delivery_type="SentCodeTypeSms",
+            timeout=60,
+        )
 
     monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
 
@@ -244,6 +251,7 @@ def test_start_login_creates_pending_session_without_real_telegram(
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "code_needed"
+    assert response.json()["delivery_type"] == "SentCodeTypeApp"
 
     with SessionLocal() as db:
         session = db.query(api_module.TelegramSession).one()
@@ -264,17 +272,24 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     existing = make_session(db_session, owner_id=111, phone="+995000000000")
     db_session.commit()
 
-    async def fake_request_login_code(session):
-        return "updated-hash"
+    async def fake_request_login_code(session, *, force_sms=False):
+        assert force_sms is True
+        return SimpleNamespace(
+            phone_code_hash="updated-hash",
+            delivery_type="SentCodeTypeSms",
+            next_delivery_type=None,
+            timeout=None,
+        )
 
     monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
 
     response = client.post(
         "/api/account/start-login",
-        json={"phone": "+995000000000"},
+        json={"phone": "+995000000000", "force_sms": True},
     )
 
     assert response.status_code == 200, response.text
+    assert response.json()["delivery_type"] == "SentCodeTypeSms"
     with SessionLocal() as db:
         sessions = db.query(api_module.TelegramSession).all()
         assert len(sessions) == 1
@@ -283,7 +298,7 @@ def test_start_login_updates_existing_session_and_reports_send_error(
         assert sessions[0].api_hash == "0123456789abcdef0123456789abcdef"
         assert sessions[0].phone_code_hash == "updated-hash"
 
-    async def failing_request_login_code(_session):
+    async def failing_request_login_code(_session, *, force_sms=False):
         raise RuntimeError("telegram rejected phone")
 
     monkeypatch.setattr(api_module, "request_login_code", failing_request_login_code)

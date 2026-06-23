@@ -100,6 +100,20 @@ def login_error_detail(stage: str, exc: Exception) -> str:
     return f"{prefix}: {exc}"
 
 
+def login_code_message(delivery_type: str | None, *, force_sms: bool) -> str:
+    if delivery_type == "SentCodeTypeSms":
+        return "Telegram отправил код по SMS."
+    if delivery_type == "SentCodeTypeCall":
+        return "Telegram отправит код звонком."
+    if delivery_type == "SentCodeTypeFlashCall":
+        return "Telegram отправит код через flash-call."
+    if delivery_type == "SentCodeTypeApp":
+        return "Telegram отправил код в Telegram-приложение или служебный чат на активном устройстве, не по SMS."
+    if force_sms:
+        return "Запросили SMS-код. Если Telegram разрешил SMS, код придёт на номер."
+    return "Telegram принял запрос на код. Если SMS не пришла, проверьте Telegram-приложение на других устройствах."
+
+
 def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
     logger.warning(
         "Telegram login failed: stage=%s session_id=%s owner=%s error_type=%s error=%s",
@@ -437,17 +451,29 @@ async def start_account_login(
         session.session_path = session.session_path or session_path
 
     try:
-        session.phone_code_hash = await request_login_code(session)
+        code_request = await request_login_code(session, force_sms=payload.force_sms)
     except Exception as exc:
         db.rollback()
         raise_login_error("start-login", session, exc)
 
+    session.phone_code_hash = code_request.phone_code_hash
     session.status = SessionStatus.code_needed
+    logger.info(
+        "Telegram login code requested: session_id=%s owner=%s delivery_type=%s next_delivery_type=%s force_sms=%s timeout=%s",
+        session.id,
+        session.owner_telegram_id,
+        code_request.delivery_type,
+        code_request.next_delivery_type,
+        payload.force_sms,
+        code_request.timeout,
+    )
     db.commit()
     return AccountLoginOut(
         session_id=session.id,
         status=session.status,
-        message="Telegram отправил код. Обычно он приходит в Telegram-приложение или служебный чат, не всегда по SMS.",
+        message=login_code_message(code_request.delivery_type, force_sms=payload.force_sms),
+        delivery_type=code_request.delivery_type,
+        next_delivery_type=code_request.next_delivery_type,
     )
 
 

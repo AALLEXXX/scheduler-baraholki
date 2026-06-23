@@ -17,6 +17,7 @@ const state = {
   auditLoading: false,
   activeTab: "posts",
   pendingSessionId: null,
+  pendingPhone: "",
   selectedDraftId: null,
   selectedChatIds: new Set(),
   selectedFolderId: "all",
@@ -1051,13 +1052,42 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
       }),
     });
     state.pendingSessionId = result.session_id;
+    state.pendingPhone = String(form.get("phone") || "");
     document.querySelector("#login-form").hidden = true;
     document.querySelector("#code-form").hidden = false;
-    notify("Код отправлен в Telegram.");
+    notify(result.message || "Код отправлен в Telegram.");
   } catch (error) {
     notify(error.message, "error");
   } finally {
     setBusy(button, false, "Получить код");
+  }
+});
+
+document.querySelector("#resend-sms-code").addEventListener("click", async (event) => {
+  clearNotice();
+  const button = event.currentTarget;
+  const phone = state.pendingPhone || new FormData(document.querySelector("#login-form")).get("phone");
+  if (!phone) {
+    notify("Сначала введите номер телефона.", "error");
+    return;
+  }
+  setBusy(button, true, "Отправляем...");
+
+  try {
+    const result = await api("account/start-login", {
+      method: "POST",
+      body: JSON.stringify({
+        phone,
+        force_sms: true,
+      }),
+    });
+    state.pendingSessionId = result.session_id;
+    state.pendingPhone = String(phone);
+    notify(result.message || "SMS-код запрошен.");
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    setBusy(button, false, "Отправить SMS");
   }
 });
 
