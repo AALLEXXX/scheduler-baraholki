@@ -76,6 +76,7 @@ class TelegramSession(Base):
     session_path: Mapped[str] = mapped_column(String(500))
     min_send_interval_seconds: Mapped[int] = mapped_column(Integer, default=30)
     last_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_code_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

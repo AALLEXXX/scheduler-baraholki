@@ -39,6 +39,8 @@ const state = {
   groupsSyncedOnInit: false,
 };
 
+let smsCooldownTimer = null;
+
 function activeSessions() {
   return state.sessions.filter((session) => session.status === "active");
 }
@@ -104,6 +106,29 @@ function setBusy(button, busy, text) {
   if (!button) return;
   button.disabled = busy;
   if (text) button.textContent = text;
+}
+
+function startSmsCooldown(seconds = 90) {
+  const button = document.querySelector("#resend-sms-code");
+  if (!button) return;
+  if (smsCooldownTimer) {
+    window.clearInterval(smsCooldownTimer);
+  }
+
+  let remaining = seconds;
+  const tick = () => {
+    if (remaining <= 0) {
+      window.clearInterval(smsCooldownTimer);
+      smsCooldownTimer = null;
+      setBusy(button, false, "Отправить SMS");
+      return;
+    }
+    setBusy(button, true, `SMS через ${remaining}с`);
+    remaining -= 1;
+  };
+
+  tick();
+  smsCooldownTimer = window.setInterval(tick, 1000);
 }
 
 function selectedGroups() {
@@ -1055,6 +1080,7 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
     state.pendingPhone = String(form.get("phone") || "");
     document.querySelector("#login-form").hidden = true;
     document.querySelector("#code-form").hidden = false;
+    startSmsCooldown(90);
     notify(result.message || "Код отправлен в Telegram.");
   } catch (error) {
     notify(error.message, "error");
@@ -1072,6 +1098,7 @@ document.querySelector("#resend-sms-code").addEventListener("click", async (even
     return;
   }
   setBusy(button, true, "Отправляем...");
+  let shouldStartCooldown = false;
 
   try {
     const result = await api("account/start-login", {
@@ -1083,11 +1110,16 @@ document.querySelector("#resend-sms-code").addEventListener("click", async (even
     });
     state.pendingSessionId = result.session_id;
     state.pendingPhone = String(phone);
+    shouldStartCooldown = true;
     notify(result.message || "SMS-код запрошен.");
   } catch (error) {
     notify(error.message, "error");
   } finally {
-    setBusy(button, false, "Отправить SMS");
+    if (shouldStartCooldown) {
+      startSmsCooldown(90);
+    } else {
+      setBusy(button, false, "Отправить SMS");
+    }
   }
 });
 

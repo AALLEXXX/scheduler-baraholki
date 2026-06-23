@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 import uuid
 from pathlib import Path
@@ -71,6 +71,7 @@ from autopost_manager.telegram_client import (
 )
 
 logger = logging.getLogger(__name__)
+LOGIN_CODE_COOLDOWN_SECONDS = 90
 
 app = FastAPI(title="Autopost Manager")
 
@@ -112,6 +113,17 @@ def login_code_message(delivery_type: str | None, *, force_sms: bool) -> str:
     if force_sms:
         return "Запросили SMS-код. Если Telegram разрешил SMS, код придёт на номер."
     return "Telegram принял запрос на код. Если SMS не пришла, проверьте Telegram-приложение на других устройствах."
+
+
+def remaining_login_code_cooldown(session: TelegramSession) -> int:
+    if not session.last_code_requested_at:
+        return 0
+    last_requested = session.last_code_requested_at
+    if last_requested.tzinfo is None:
+        last_requested = last_requested.replace(tzinfo=UTC)
+    elapsed = datetime.now(UTC) - last_requested
+    remaining = timedelta(seconds=LOGIN_CODE_COOLDOWN_SECONDS) - elapsed
+    return max(0, int(remaining.total_seconds()))
 
 
 def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
@@ -450,6 +462,13 @@ async def start_account_login(
         session.api_hash = settings.telegram_api_hash
         session.session_path = session.session_path or session_path
 
+    cooldown_seconds = remaining_login_code_cooldown(session)
+    if cooldown_seconds:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Повторно запросить код можно через {cooldown_seconds} сек.",
+        )
+
     try:
         code_request = await request_login_code(session, force_sms=payload.force_sms)
     except Exception as exc:
@@ -458,7 +477,8 @@ async def start_account_login(
 
     session.phone_code_hash = code_request.phone_code_hash
     session.status = SessionStatus.code_needed
-    logger.info(
+    session.last_code_requested_at = datetime.now(UTC)
+    logger.warning(
         "Telegram login code requested: session_id=%s owner=%s delivery_type=%s next_delivery_type=%s force_sms=%s timeout=%s",
         session.id,
         session.owner_telegram_id,

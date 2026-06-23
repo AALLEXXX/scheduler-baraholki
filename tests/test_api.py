@@ -312,6 +312,31 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     assert "telegram rejected phone" in response.text
 
 
+def test_start_login_enforces_code_request_cooldown(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+    existing = make_session(db_session, owner_id=111, phone="+995000000000")
+    existing.last_code_requested_at = datetime.now(UTC)
+    db_session.commit()
+
+    async def unexpected_request_login_code(_session, *, force_sms=False):
+        raise AssertionError("Telegram should not be called while cooldown is active")
+
+    monkeypatch.setattr(api_module, "request_login_code", unexpected_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "+995000000000", "force_sms": True},
+    )
+
+    assert response.status_code == 429
+    assert "Повторно запросить код можно" in response.text
+
+
 def test_confirm_code_handles_password_needed_and_success(client, auth_user, db_session, monkeypatch) -> None:
     auth_user(111)
     session = make_session(db_session, owner_id=111, status=SessionStatus.code_needed)

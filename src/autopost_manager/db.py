@@ -40,6 +40,7 @@ def ensure_runtime_columns() -> None:
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS api_hash VARCHAR(160)",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS phone_code_hash VARCHAR(300)",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS session_string TEXT",
+        "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS last_code_requested_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS owner_telegram_id BIGINT",
         "ALTER TABLE target_chats ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true",
         "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_bot_chat_id BIGINT",
