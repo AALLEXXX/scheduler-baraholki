@@ -642,5 +642,5 @@ def test_confirm_login_password_returns_user_and_disconnects(monkeypatch, db_ses
     me = asyncio.run(telegram_client.confirm_login_password(session, "secret"))
 
     assert me.id == 777
-    assert fake_client.sign_ins == [{"password": "secret"}]
+    assert fake_client.sign_ins == [{"phone": session.phone, "password": "secret"}]
     assert fake_client.disconnected is True

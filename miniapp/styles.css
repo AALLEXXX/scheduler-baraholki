@@ -356,6 +356,25 @@ textarea {
   outline: none;
 }
 
+.login-flow-form input {
+  background: color-mix(in srgb, var(--surface-strong) 82%, #ffffff 18%);
+  color: var(--text);
+  caret-color: var(--brand);
+  -webkit-text-fill-color: var(--text);
+}
+
+.login-flow-form input::placeholder {
+  color: var(--muted);
+  opacity: 0.86;
+  -webkit-text-fill-color: var(--muted);
+}
+
+#password-form input[type="password"] {
+  color: var(--text);
+  letter-spacing: 0;
+  -webkit-text-fill-color: var(--text);
+}
+
 input[type="datetime-local"] {
   display: block;
   min-width: 0;

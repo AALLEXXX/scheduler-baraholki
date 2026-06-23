@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import logging
 import uuid
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from telethon.errors import (
+    FloodWaitError,
+    PasswordHashInvalidError,
+    PhoneCodeEmptyError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    PhoneNumberBannedError,
+    PhoneNumberFloodError,
+    PhoneNumberInvalidError,
+    PhonePasswordFloodError,
+)
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import create_schema, get_db
@@ -58,7 +70,46 @@ from autopost_manager.telegram_client import (
     request_login_code,
 )
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Autopost Manager")
+
+
+def login_error_detail(stage: str, exc: Exception) -> str:
+    if isinstance(exc, FloodWaitError):
+        return f"Telegram временно ограничил попытки. Попробуйте через {exc.seconds} сек."
+    if isinstance(exc, PhoneNumberFloodError):
+        return "Telegram временно ограничил отправку кодов на этот номер. Попробуйте позже."
+    if isinstance(exc, PhonePasswordFloodError):
+        return "Telegram временно ограничил попытки ввода 2FA-пароля. Попробуйте позже."
+    if isinstance(exc, PhoneNumberInvalidError):
+        return "Telegram не принял номер. Проверьте формат: номер должен быть с кодом страны, например +995..."
+    if isinstance(exc, PhoneNumberBannedError):
+        return "Telegram не разрешает вход для этого номера: аккаунт заблокирован или ограничен."
+    if isinstance(exc, (PhoneCodeEmptyError, PhoneCodeInvalidError)):
+        return "Telegram не принял код. Проверьте код и попробуйте ещё раз."
+    if isinstance(exc, PhoneCodeExpiredError):
+        return "Код Telegram истёк. Нажмите «Получить код» ещё раз."
+    if isinstance(exc, PasswordHashInvalidError):
+        return "Telegram не принял пароль 2FA. Нужен облачный пароль из настроек Telegram, не код из сообщения."
+    prefix = {
+        "start-login": "Не удалось отправить код Telegram",
+        "confirm-code": "Не удалось подтвердить код Telegram",
+        "confirm-password": "Не удалось подтвердить пароль 2FA",
+    }.get(stage, "Telegram вернул ошибку")
+    return f"{prefix}: {exc}"
+
+
+def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
+    logger.warning(
+        "Telegram login failed: stage=%s session_id=%s owner=%s error_type=%s error=%s",
+        stage,
+        session.id,
+        session.owner_telegram_id,
+        type(exc).__name__,
+        exc,
+    )
+    raise HTTPException(status_code=422, detail=login_error_detail(stage, exc)) from exc
 
 
 @app.on_event("startup")
@@ -389,14 +440,14 @@ async def start_account_login(
         session.phone_code_hash = await request_login_code(session)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail=f"Could not send Telegram code: {exc}") from exc
+        raise_login_error("start-login", session, exc)
 
     session.status = SessionStatus.code_needed
     db.commit()
     return AccountLoginOut(
         session_id=session.id,
         status=session.status,
-        message="Telegram sent a login code. Enter it below.",
+        message="Telegram отправил код. Обычно он приходит в Telegram-приложение или служебный чат, не всегда по SMS.",
     )
 
 
@@ -413,7 +464,7 @@ async def confirm_account_code(
     try:
         completed, me = await confirm_login_code(session, payload.code)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Could not confirm code: {exc}") from exc
+        raise_login_error("confirm-code", session, exc)
 
     if not completed:
         session.status = SessionStatus.password_needed
@@ -445,7 +496,7 @@ async def confirm_account_password(
     try:
         me = await confirm_login_password(session, payload.password)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Could not confirm password: {exc}") from exc
+        raise_login_error("confirm-password", session, exc)
 
     session.telegram_user_id = me.id
     session.username = me.username

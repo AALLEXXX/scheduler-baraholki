@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260623-14" />
+    <link rel="stylesheet" href="styles.css?v=20260623-15" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -41,7 +41,7 @@
           <p>Введите номер телефона. Код придёт в Telegram.</p>
         </div>
 
-        <form id="login-form" class="stack">
+        <form id="login-form" class="stack login-flow-form">
           <label>
             Телефон
             <input name="phone" autocomplete="tel" placeholder="+995..." required />
@@ -49,7 +49,7 @@
           <button id="send-code" type="submit">Получить код</button>
         </form>
 
-        <form id="code-form" class="stack" hidden>
+        <form id="code-form" class="stack login-flow-form" hidden>
           <label>
             Код из Telegram
             <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
@@ -57,7 +57,7 @@
           <button type="submit">Подключить</button>
         </form>
 
-        <form id="password-form" class="stack" hidden>
+        <form id="password-form" class="stack login-flow-form" hidden>
           <label>
             Пароль 2FA
             <input name="password" type="password" autocomplete="current-password" required />
@@ -262,6 +262,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260623-14"></script>
+    <script src="app.js?v=20260623-15"></script>
   </body>
 </html>

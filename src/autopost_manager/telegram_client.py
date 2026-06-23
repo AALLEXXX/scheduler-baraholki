@@ -638,7 +638,7 @@ async def confirm_login_password(session: TelegramSession, password: str) -> obj
         client = build_client(session)
         await client.connect()
         try:
-            await client.sign_in(password=password)
+            await client.sign_in(phone=session.phone, password=password)
             return await client.get_me()
         finally:
             remember_client_session(session, client)

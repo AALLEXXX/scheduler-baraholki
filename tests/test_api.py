@@ -4,6 +4,8 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from telethon.errors import PasswordHashInvalidError
+
 from autopost_manager import api as api_module
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import (
@@ -395,6 +397,17 @@ def test_confirm_password_success_foreign_and_telegram_error(
     )
     assert response.status_code == 422
     assert "wrong password" in response.text
+
+    async def invalid_telegram_password(_session, _password):
+        raise PasswordHashInvalidError(request=None)
+
+    monkeypatch.setattr(api_module, "confirm_login_password", invalid_telegram_password)
+    invalid_response = client.post(
+        "/api/account/confirm-password",
+        json={"session_id": str(session.id), "password": "bad"},
+    )
+    assert invalid_response.status_code == 422
+    assert "облачный пароль" in invalid_response.text
 
     class Me:
         id = 888
