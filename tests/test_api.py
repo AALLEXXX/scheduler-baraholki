@@ -262,6 +262,27 @@ def test_start_login_creates_pending_session_without_real_telegram(
         assert session.phone_code_hash == "phone-code-hash"
 
 
+def test_start_login_rejects_invalid_phone_before_telegram(
+    client,
+    auth_user,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+
+    async def unexpected_request_login_code(_session, *, force_sms=False):
+        raise AssertionError("Telegram should not be called for invalid phone")
+
+    monkeypatch.setattr(api_module, "request_login_code", unexpected_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "999"},
+    )
+
+    assert response.status_code == 422
+    assert "код страны" in response.text or "номер телефона" in response.text
+
+
 def test_start_login_updates_existing_session_and_reports_send_error(
     client,
     auth_user,

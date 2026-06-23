@@ -39,7 +39,9 @@ def test_miniapp_login_only_asks_for_phone_number() -> None:
     html = read("index.html")
     js = read("app.js")
 
-    assert 'name="phone"' in html
+    assert 'name="country_code"' in html
+    assert 'name="phone_local"' in html
+    assert "loginPhoneFromForm" in js
     assert 'name="api_id"' not in html
     assert 'name="api_hash"' not in html
     assert "API ID" not in html

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from autopost_manager.models import JobStatus, PostStatus, ScheduleKind, SessionStatus, TargetChatType
 
@@ -25,8 +26,21 @@ class AppConfigOut(BaseModel):
 
 
 class AccountStartLogin(BaseModel):
-    phone: str = Field(min_length=5, max_length=40)
+    phone: str = Field(min_length=1, max_length=40)
     force_sms: bool = False
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: str) -> str:
+        cleaned = re.sub(r"[\s().-]", "", value.strip())
+        if cleaned.startswith("00"):
+            cleaned = f"+{cleaned[2:]}"
+        if not cleaned.startswith("+"):
+            raise ValueError("Выберите код страны и введите номер в международном формате")
+        digits = cleaned[1:]
+        if not digits.isdigit() or not 8 <= len(digits) <= 15:
+            raise ValueError("Проверьте номер телефона: нужен код страны и 8-15 цифр")
+        return cleaned
 
 
 class AccountCodeConfirm(BaseModel):

@@ -382,6 +382,12 @@ textarea {
   align-items: center;
 }
 
+.phone-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.34fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
 input[type="datetime-local"] {
   display: block;
   min-width: 0;
@@ -837,6 +843,7 @@ textarea {
 
   .form-grid,
   .login-action-row,
+  .phone-row,
   .panel-heading {
     grid-template-columns: 1fr;
     display: grid;

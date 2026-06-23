@@ -147,6 +147,15 @@ function updateSmsButtonFromLoginResult(result) {
   setBusy(button, true, "SMS недоступна");
 }
 
+function loginPhoneFromForm(form) {
+  const countryCode = String(form.get("country_code") || "").replace(/[^\d+]/g, "");
+  const localPhone = String(form.get("phone_local") || "").replace(/[^\d]/g, "");
+  if (!countryCode || !localPhone) {
+    return "";
+  }
+  return `${countryCode}${localPhone}`;
+}
+
 function selectedGroups() {
   return [...state.selectedChatIds];
 }
@@ -1082,6 +1091,7 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   event.preventDefault();
   clearNotice();
   const form = new FormData(event.currentTarget);
+  const phone = loginPhoneFromForm(form);
   const button = document.querySelector("#send-code");
   setBusy(button, true, "Отправляем...");
 
@@ -1089,11 +1099,11 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
     const result = await api("account/start-login", {
       method: "POST",
       body: JSON.stringify({
-        phone: form.get("phone"),
+        phone,
       }),
     });
     state.pendingSessionId = result.session_id;
-    state.pendingPhone = String(form.get("phone") || "");
+    state.pendingPhone = phone;
     document.querySelector("#login-form").hidden = true;
     document.querySelector("#code-form").hidden = false;
     updateSmsButtonFromLoginResult(result);
@@ -1108,7 +1118,7 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
 document.querySelector("#resend-sms-code").addEventListener("click", async (event) => {
   clearNotice();
   const button = event.currentTarget;
-  const phone = state.pendingPhone || new FormData(document.querySelector("#login-form")).get("phone");
+  const phone = state.pendingPhone || loginPhoneFromForm(new FormData(document.querySelector("#login-form")));
   if (!phone) {
     notify("Сначала введите номер телефона.", "error");
     return;
