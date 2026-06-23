@@ -85,6 +85,7 @@ class LoginClient(AuthorizedClient):
         super().__init__()
         self.password_needed = password_needed
         self.sign_ins: list[dict[str, object]] = []
+        self.resend_requests: list[object] = []
 
     async def send_code_request(self, phone: str, *, force_sms: bool = False):
         self.phone = phone
@@ -94,6 +95,15 @@ class LoginClient(AuthorizedClient):
             type=SimpleNamespace(),
             next_type=None,
             timeout=60,
+        )
+
+    async def __call__(self, request):
+        self.resend_requests.append(request)
+        return SimpleNamespace(
+            phone_code_hash="resent-code-hash",
+            type=SimpleNamespace(),
+            next_type=None,
+            timeout=90,
         )
 
     async def sign_in(self, **kwargs):
@@ -608,13 +618,42 @@ def test_request_login_code_uses_client_and_disconnects(monkeypatch, db_session)
     fake_client = LoginClient()
     monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
 
-    code_request = asyncio.run(telegram_client.request_login_code(session, force_sms=True))
+    code_request = asyncio.run(telegram_client.request_login_code(session))
 
     assert code_request.phone_code_hash == "sent-code-hash"
     assert code_request.delivery_type == "SimpleNamespace"
     assert code_request.timeout == 60
     assert fake_client.phone == "+123"
-    assert fake_client.force_sms is True
+    assert fake_client.force_sms is False
+    assert fake_client.resend_requests == []
+    assert fake_client.disconnected is True
+
+
+def test_request_login_code_resends_with_existing_hash(monkeypatch, db_session) -> None:
+    session = make_session(db_session, phone="+123")
+    session.phone_code_hash = "phone-hash"
+    fake_client = LoginClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    code_request = asyncio.run(telegram_client.request_login_code(session, force_sms=True))
+
+    assert code_request.phone_code_hash == "resent-code-hash"
+    assert code_request.delivery_type == "SimpleNamespace"
+    assert code_request.timeout == 90
+    assert len(fake_client.resend_requests) == 1
+    assert fake_client.disconnected is True
+
+
+def test_request_login_code_without_hash_uses_normal_request(monkeypatch, db_session) -> None:
+    session = make_session(db_session, phone="+123")
+    fake_client = LoginClient()
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    code_request = asyncio.run(telegram_client.request_login_code(session, force_sms=True))
+
+    assert code_request.phone_code_hash == "sent-code-hash"
+    assert fake_client.force_sms is False
+    assert fake_client.resend_requests == []
     assert fake_client.disconnected is True
 
 
