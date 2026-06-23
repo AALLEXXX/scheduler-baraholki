@@ -462,11 +462,11 @@ async def start_account_login(
         session.api_hash = settings.telegram_api_hash
         session.session_path = session.session_path or session_path
 
-    cooldown_seconds = remaining_login_code_cooldown(session)
+    cooldown_seconds = remaining_login_code_cooldown(session) if payload.force_sms else 0
     if cooldown_seconds:
         raise HTTPException(
             status_code=429,
-            detail=f"Повторно запросить код можно через {cooldown_seconds} сек.",
+            detail=f"Повторно запросить SMS можно через {cooldown_seconds} сек.",
         )
 
     try:
@@ -477,7 +477,8 @@ async def start_account_login(
 
     session.phone_code_hash = code_request.phone_code_hash
     session.status = SessionStatus.code_needed
-    session.last_code_requested_at = datetime.now(UTC)
+    if payload.force_sms:
+        session.last_code_requested_at = datetime.now(UTC)
     logger.warning(
         "Telegram login code requested: session_id=%s owner=%s delivery_type=%s next_delivery_type=%s force_sms=%s timeout=%s",
         session.id,

@@ -334,7 +334,38 @@ def test_start_login_enforces_code_request_cooldown(
     )
 
     assert response.status_code == 429
-    assert "Повторно запросить код можно" in response.text
+    assert "Повторно запросить SMS можно" in response.text
+
+
+def test_start_login_cooldown_does_not_block_app_code(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+    existing = make_session(db_session, owner_id=111, phone="+995000000000")
+    existing.last_code_requested_at = datetime.now(UTC)
+    db_session.commit()
+
+    async def fake_request_login_code(_session, *, force_sms=False):
+        assert force_sms is False
+        return SimpleNamespace(
+            phone_code_hash="app-hash",
+            delivery_type="SentCodeTypeApp",
+            next_delivery_type=None,
+            timeout=None,
+        )
+
+    monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "+995000000000"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["delivery_type"] == "SentCodeTypeApp"
 
 
 def test_confirm_code_handles_password_needed_and_success(client, auth_user, db_session, monkeypatch) -> None:

@@ -1080,7 +1080,6 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
     state.pendingPhone = String(form.get("phone") || "");
     document.querySelector("#login-form").hidden = true;
     document.querySelector("#code-form").hidden = false;
-    startSmsCooldown(90);
     notify(result.message || "Код отправлен в Telegram.");
   } catch (error) {
     notify(error.message, "error");
