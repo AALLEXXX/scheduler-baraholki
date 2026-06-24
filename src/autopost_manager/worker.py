@@ -26,6 +26,19 @@ def choose_session(db, job: PublishJob) -> TelegramSession | None:
     ).first()
 
 
+def owner_autopost_paused(db, owner_id: int | None) -> bool:
+    if owner_id is None:
+        return False
+    return (
+        db.scalar(
+            select(UserSettings.autopost_paused).where(
+                UserSettings.telegram_user_id == owner_id,
+            )
+        )
+        is True
+    )
+
+
 async def process_one_job() -> bool:
     now = datetime.now(UTC)
     with SessionLocal() as db:
@@ -55,6 +68,12 @@ async def process_one_job() -> bool:
         if not session:
             job.status = JobStatus.failed
             job.last_error = "No active session selected for job"
+            db.commit()
+            return True
+
+        if owner_autopost_paused(db, job.post.created_by_telegram_id):
+            job.status = JobStatus.cancelled
+            job.last_error = "Autoposting paused by user"
             db.commit()
             return True
 

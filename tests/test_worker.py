@@ -91,6 +91,35 @@ def test_process_one_job_skips_globally_paused_owner(db_session) -> None:
         assert refreshed.attempts == 0
 
 
+def test_process_one_job_cancels_if_owner_is_paused_after_pick(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    def pause_owner_before_send(db, selected_job):
+        db.add(UserSettings(telegram_user_id=111, autopost_paused=True))
+        db.commit()
+        db.refresh(selected_job)
+        return selected_job.session
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("send_post_from_session must not be called while autopost is paused")
+
+    monkeypatch.setattr(worker, "choose_session", pause_owner_before_send)
+    monkeypatch.setattr(worker, "send_post_from_session", fail_if_called)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    with SessionLocal() as db:
+        refreshed = db.get(PublishJob, job.id)
+        assert refreshed.status == JobStatus.cancelled
+        assert refreshed.attempts == 1
+        assert refreshed.last_error == "Autoposting paused by user"
+
+
 def test_process_one_job_without_active_session_fails_job(db_session) -> None:
     session = make_session(db_session, owner_id=111, status=SessionStatus.paused)
     chat = make_chat(db_session, session)
