@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
@@ -72,13 +72,16 @@ def enqueue_due_posts() -> int:
     now = datetime.now(UTC)
     created = 0
     with SessionLocal() as db:
+        paused_owner_exists = exists().where(
+            UserSettings.telegram_user_id == Post.created_by_telegram_id,
+            UserSettings.autopost_paused.is_(True),
+        )
         posts = db.scalars(
             select(Post)
-            .outerjoin(UserSettings, UserSettings.telegram_user_id == Post.created_by_telegram_id)
             .where(Post.status == PostStatus.scheduled)
             .where(Post.next_run_at.is_not(None))
             .where(Post.next_run_at <= now)
-            .where(or_(UserSettings.telegram_user_id.is_(None), UserSettings.autopost_paused.is_(False)))
+            .where(~paused_owner_exists)
         ).unique()
 
         for post in posts:

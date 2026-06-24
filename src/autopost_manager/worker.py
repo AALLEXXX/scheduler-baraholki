@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
@@ -29,16 +29,19 @@ def choose_session(db, job: PublishJob) -> TelegramSession | None:
 async def process_one_job() -> bool:
     now = datetime.now(UTC)
     with SessionLocal() as db:
+        paused_owner_exists = exists().where(
+            UserSettings.telegram_user_id == Post.created_by_telegram_id,
+            UserSettings.autopost_paused.is_(True),
+        )
         job = db.scalars(
             select(PublishJob)
             .join(Post, PublishJob.post_id == Post.id)
-            .outerjoin(UserSettings, UserSettings.telegram_user_id == Post.created_by_telegram_id)
             .where(PublishJob.status == JobStatus.pending)
             .where(PublishJob.due_at <= now)
-            .where(or_(UserSettings.telegram_user_id.is_(None), UserSettings.autopost_paused.is_(False)))
+            .where(~paused_owner_exists)
             .order_by(PublishJob.due_at)
             .limit(1)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=PublishJob)
         ).first()
         if not job:
             return False
