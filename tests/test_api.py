@@ -18,6 +18,7 @@ from autopost_manager.models import (
     SessionStatus,
     TargetChat,
     TargetChatType,
+    UserSettings,
 )
 
 from conftest import make_chat, make_job, make_media, make_post, make_session
@@ -579,7 +580,7 @@ def test_sync_chats_imports_and_updates_owned_dialogs(client, auth_user, db_sess
         assert chats[1].username == "new"
 
 
-def test_logout_revokes_sessions_hides_chats_and_deletes_session_files(
+def test_logout_soft_pauses_without_deleting_session(
     client,
     auth_user,
     db_session,
@@ -600,18 +601,96 @@ def test_logout_revokes_sessions_hides_chats_and_deletes_session_files(
     response = client.post("/api/account/logout")
 
     assert response.status_code == 200
-    assert response.json() == {"revoked_sessions": 1, "disabled_chats": 1}
+    assert response.json() == {"autopost_paused": True, "cancelled_jobs": 1}
+    assert session_file.exists()
+    assert client.get("/api/sessions").json()[0]["status"] == "active"
+    assert client.get("/api/chats").json()
+    assert client.get("/api/posts").json()
+    jobs = client.get("/api/jobs").json()
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "cancelled"
+    assert client.patch(f"/api/posts/{post.id}/pause").status_code == 409
+
+    db_session.refresh(post)
+    db_session.refresh(pending_job)
+    assert post.status == PostStatus.scheduled
+    assert pending_job.status == JobStatus.cancelled
+
+
+def test_revoke_session_deletes_session_and_hides_user_data(
+    client,
+    auth_user,
+    db_session,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    session_file = tmp_path / "telegram.session"
+    session_file.write_text("secret", encoding="utf-8")
+    session = make_session(db_session, owner_id=111)
+    session.session_path = str(session_file)
+    session.session_string = "string-session"
+    chat = make_chat(db_session, session, title="Visible group")
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    pending_job = make_job(db_session, post, chat, session=session, status=JobStatus.pending)
+    db_session.commit()
+
+    called = []
+
+    async def fake_logout_session_from_telegram(logout_session):
+        called.append(logout_session.id)
+
+    monkeypatch.setattr(api_module, "logout_session_from_telegram", fake_logout_session_from_telegram)
+
+    auth_user(111)
+    response = client.post("/api/account/revoke-session")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "revoked_sessions": 1,
+        "disabled_chats": 1,
+        "cancelled_jobs": 1,
+        "telegram_logout_errors": [],
+    }
+    assert called == [session.id]
     assert not session_file.exists()
     assert client.get("/api/sessions").json()[0]["status"] == "revoked"
     assert client.get("/api/chats").json() == []
     assert client.get("/api/posts").json() == []
     assert client.get("/api/jobs").json() == []
-    assert client.patch(f"/api/posts/{post.id}/pause").status_code == 409
 
     db_session.refresh(post)
     db_session.refresh(pending_job)
+    db_session.refresh(session)
     assert post.status == PostStatus.paused
     assert pending_job.status == JobStatus.cancelled
+    assert session.session_string is None
+    assert db_session.get(UserSettings, 111).autopost_paused is True
+
+
+def test_account_pause_and_resume_toggle_user_settings(client, auth_user, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    make_job(db_session, post, chat, session=session, status=JobStatus.pending)
+    db_session.commit()
+    auth_user(111)
+
+    pause_response = client.post("/api/account/pause")
+    assert pause_response.status_code == 200
+    assert pause_response.json() == {"autopost_paused": True, "cancelled_jobs": 1}
+    assert client.get("/api/user-settings").json() == {"autopost_paused": True}
+
+    blocked_response = client.post(
+        f"/api/posts/{post.id}/schedule",
+        json=post_payload(str(session.id), [str(chat.id)]),
+    )
+    assert blocked_response.status_code == 409
+    assert "Автопостинг на паузе" in blocked_response.text
+
+    resume_response = client.post("/api/account/resume")
+    assert resume_response.status_code == 200
+    assert resume_response.json() == {"autopost_paused": False, "cancelled_jobs": 0}
+    assert client.get("/api/user-settings").json() == {"autopost_paused": False}
 
 
 def test_queue_actions_require_active_account(client, auth_user, db_session) -> None:

@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from autopost_manager.db import Base
@@ -55,6 +65,17 @@ class TargetChatType(str, enum.Enum):
     group = "group"
     supergroup = "supergroup"
     channel = "channel"
+
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    autopost_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class TelegramSession(Base):

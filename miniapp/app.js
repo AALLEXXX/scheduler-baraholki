@@ -9,6 +9,7 @@ if (tg) {
 
 const state = {
   config: { bot_username: "scheduler_baraholki_bot" },
+  settings: { autopost_paused: false },
   sessions: [],
   chats: [],
   folders: [],
@@ -43,6 +44,10 @@ let smsCooldownTimer = null;
 
 function activeSessions() {
   return state.sessions.filter((session) => session.status === "active");
+}
+
+function isAutopostPaused() {
+  return Boolean(state.settings?.autopost_paused);
 }
 
 function draftPosts() {
@@ -431,6 +436,7 @@ function render() {
   const connected = activeSessions();
   const primarySession = connected[0] || state.sessions[0];
   const hasAccount = connected.length > 0;
+  const paused = isAutopostPaused();
   const hasGroups = state.chats.length > 0;
   const drafts = draftPosts();
   const queued = queuePosts();
@@ -442,16 +448,23 @@ function render() {
   document.querySelector("#groups-count").textContent = `${filteredChats().length} групп`;
 
   const stateDot = document.querySelector("#account-state");
-  stateDot.className = `status-dot ${hasAccount ? "online" : ""}`;
-  document.querySelector("#account-title").textContent = hasAccount ? "Аккаунт подключен" : "Аккаунт не подключен";
+  stateDot.className = `status-dot ${hasAccount ? (paused ? "paused" : "online") : ""}`;
+  document.querySelector("#account-title").textContent = hasAccount
+    ? paused
+      ? "Отправка на паузе"
+      : "Аккаунт подключен"
+    : "Аккаунт не подключен";
   document.querySelector("#account-subtitle").textContent = hasAccount
     ? `${primarySession.phone || ""} ${primarySession.username ? `@${primarySession.username}` : ""}`.trim()
     : "Подключите Telegram-аккаунт для отправки";
 
   document.querySelector("#connect-panel").hidden = hasAccount || state.activeTab !== "posts";
-  document.querySelector("#logout-account").hidden = !hasAccount;
+  document.querySelector("#account-pause").hidden = !hasAccount;
+  document.querySelector("#account-pause").textContent = paused ? "Снять паузу" : "Пауза";
   document.querySelector("#compose-hint").textContent = hasAccount
-    ? hasGroups
+    ? paused
+      ? "Глобальная пауза включена. Снимите паузу, чтобы менять отправки."
+      : hasGroups
       ? "Выберите черновик, время и группы."
       : "Группы обновятся автоматически. Можно обновить вручную."
     : "Сначала подключите аккаунт.";
@@ -466,7 +479,9 @@ function render() {
   }
 
   const saveButton = document.querySelector("#save-post");
-  saveButton.disabled = !hasAccount || !hasGroups || !state.selectedDraftId;
+  saveButton.disabled = paused || !hasAccount || !hasGroups || !state.selectedDraftId;
+
+  renderSettingsPanel(hasAccount, paused);
 
   renderDraftPicker();
 
@@ -740,6 +755,11 @@ function renderPost(post) {
   node.querySelector('[data-field="media"]').textContent = mediaLabel(post);
   node.querySelector('[data-action="pause"]').textContent =
     post.status === "paused" ? "Продолжить" : "Пауза";
+  if (isAutopostPaused()) {
+    node.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+  }
   node.querySelector('[data-action="edit"]').addEventListener("click", () => openEditPost(post));
   node.querySelector('[data-action="pause"]').addEventListener("click", () => {
     togglePausePost(post).catch((error) => notify(error.message, "error"));
@@ -748,6 +768,20 @@ function renderPost(post) {
     deletePost(post.id).catch((error) => notify(error.message, "error"));
   });
   return node;
+}
+
+function renderSettingsPanel(hasAccount, paused) {
+  const text = document.querySelector("#global-pause-text");
+  const settingsPause = document.querySelector("#settings-pause");
+  const revoke = document.querySelector("#revoke-session");
+  if (!text || !settingsPause || !revoke) return;
+
+  text.textContent = paused
+    ? "Все отправки остановлены. Telegram-сессия сохранена, повторный код не нужен."
+    : "Останавливает все отправки, не удаляя Telegram-сессию.";
+  settingsPause.textContent = paused ? "Снять паузу" : "Пауза";
+  settingsPause.disabled = !hasAccount;
+  revoke.disabled = !hasAccount;
 }
 
 function renderEditFolderPicker() {
@@ -875,14 +909,16 @@ function deletionMessage(result) {
 }
 
 async function load(options = {}) {
-  const [config, sessions, chats, folders, posts] = await Promise.all([
+  const [config, settings, sessions, chats, folders, posts] = await Promise.all([
     api("app-config"),
+    api("user-settings"),
     api("sessions"),
     api("chats"),
     api("folders"),
     api("posts"),
   ]);
   state.config = config;
+  state.settings = settings;
   state.sessions = sessions;
   state.chats = chats;
   state.folders = folders;
@@ -897,7 +933,12 @@ async function load(options = {}) {
   state.selectedChatIds = new Set([...state.selectedChatIds].filter((id) => availableIds.has(id)));
   render();
 
-  if (options.autoSyncGroups && activeSessions().length > 0 && !state.groupsSyncedOnInit) {
+  if (
+    options.autoSyncGroups &&
+    activeSessions().length > 0 &&
+    !isAutopostPaused() &&
+    !state.groupsSyncedOnInit
+  ) {
     state.groupsSyncedOnInit = true;
     await syncGroups({ silent: true });
   }
@@ -922,6 +963,10 @@ async function syncGroups(options = {}) {
   const session = activeSessions()[0];
   if (!session) {
     notify("Сначала подключите аккаунт.", "error");
+    return;
+  }
+  if (isAutopostPaused()) {
+    notify("Автопостинг на паузе.", "error");
     return;
   }
   if (!options.silent) clearNotice();
@@ -994,24 +1039,53 @@ document.querySelectorAll(".tab-button").forEach((button) => {
   });
 });
 
-document.querySelector("#logout-account").addEventListener("click", async () => {
+async function setGlobalPause(paused) {
   clearNotice();
-  const confirmed = window.confirm("Выйти из подключенного Telegram-аккаунта?");
-  if (!confirmed) return;
-  const button = document.querySelector("#logout-account");
-  setBusy(button, true, "Выходим...");
+  const endpoint = paused ? "account/pause" : "account/resume";
+  const buttons = [document.querySelector("#account-pause"), document.querySelector("#settings-pause")].filter(Boolean);
+  buttons.forEach((button) => setBusy(button, true, paused ? "Ставим..." : "Снимаем..."));
   try {
-    await api("account/logout", { method: "POST" });
-    state.selectedDraftId = null;
-    state.selectedFolderId = "all";
-    state.selectedChatIds.clear();
-    state.groupsSyncedOnInit = false;
-    notify("Аккаунт отключен.");
+    await api(endpoint, { method: "POST" });
+    notify(paused ? "Автопостинг поставлен на паузу." : "Автопостинг снова активен.");
     await load();
   } catch (error) {
     notify(error.message, "error");
   } finally {
-    setBusy(button, false, "Выйти");
+    render();
+  }
+}
+
+document.querySelector("#account-pause").addEventListener("click", () => {
+  setGlobalPause(!isAutopostPaused()).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#settings-pause").addEventListener("click", () => {
+  setGlobalPause(!isAutopostPaused()).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#revoke-session").addEventListener("click", async () => {
+  clearNotice();
+  const confirmed = window.confirm(
+    "Отключить Telegram-сессию? После этого для повторного подключения Telegram снова запросит код.",
+  );
+  if (!confirmed) return;
+  const button = document.querySelector("#revoke-session");
+  setBusy(button, true, "Отключаем...");
+  try {
+    const result = await api("account/revoke-session", { method: "POST" });
+    state.selectedDraftId = null;
+    state.selectedFolderId = "all";
+    state.selectedChatIds.clear();
+    state.groupsSyncedOnInit = false;
+    const suffix = result.telegram_logout_errors?.length
+      ? " Telegram мог не подтвердить закрытие сессии, но доступ в сервисе удалён."
+      : "";
+    notify(`Telegram-сессия отключена.${suffix}`);
+    await load();
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    setBusy(button, false, "Отключить");
   }
 });
 

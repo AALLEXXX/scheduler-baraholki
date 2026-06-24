@@ -25,6 +25,10 @@ class AppConfigOut(BaseModel):
     bot_username: str
 
 
+class UserSettingsOut(BaseModel):
+    autopost_paused: bool = False
+
+
 class AccountStartLogin(BaseModel):
     phone: str = Field(min_length=1, max_length=40)
     force_sms: bool = False
@@ -118,9 +122,16 @@ class ChatSyncResult(BaseModel):
     total_dialogs: int
 
 
-class AccountLogoutOut(BaseModel):
+class AccountPauseOut(BaseModel):
+    autopost_paused: bool
+    cancelled_jobs: int = 0
+
+
+class AccountRevokeOut(BaseModel):
     revoked_sessions: int
     disabled_chats: int
+    cancelled_jobs: int
+    telegram_logout_errors: list[str] = Field(default_factory=list)
 
 
 class DeletePostOut(BaseModel):

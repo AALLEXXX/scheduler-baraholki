@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from autopost_manager import scheduler
 from autopost_manager.db import SessionLocal
-from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind
+from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
 
 from conftest import make_chat, make_post, make_session
 
@@ -62,6 +62,29 @@ def test_enqueue_due_interval_post_creates_job_and_moves_next_run_forward(db_ses
         assert refreshed.status == PostStatus.scheduled
         assert as_aware(refreshed.next_run_at) > datetime.now(UTC) + timedelta(minutes=40)
         assert db.query(PublishJob).count() == 1
+
+
+def test_enqueue_due_posts_skips_globally_paused_owner(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.once,
+        next_run_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    db_session.add(UserSettings(telegram_user_id=111, autopost_paused=True))
+    db_session.commit()
+
+    created = scheduler.enqueue_due_posts()
+
+    assert created == 0
+    with SessionLocal() as db:
+        refreshed = db.get(Post, post.id)
+        assert refreshed.status == PostStatus.scheduled
+        assert db.query(PublishJob).count() == 0
 
 
 def test_enqueue_due_daily_post_moves_to_next_day(db_session) -> None:

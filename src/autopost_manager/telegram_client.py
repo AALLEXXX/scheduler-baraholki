@@ -658,3 +658,14 @@ async def confirm_login_password(session: TelegramSession, password: str) -> obj
         finally:
             remember_client_session(session, client)
             await client.disconnect()
+
+
+async def logout_session_from_telegram(session: TelegramSession) -> None:
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        await client.connect()
+        try:
+            if await client.is_user_authorized():
+                await client.log_out()
+        finally:
+            await client.disconnect()

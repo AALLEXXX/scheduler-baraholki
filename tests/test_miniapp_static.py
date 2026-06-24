@@ -148,12 +148,18 @@ def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
     assert 'id="edit-close" class="modal-close"' in html
 
 
-def test_miniapp_auto_syncs_groups_and_can_logout_account() -> None:
+def test_miniapp_auto_syncs_groups_and_can_pause_or_revoke_account() -> None:
     html = read("index.html")
     js = read("app.js")
 
-    assert 'id="logout-account"' in html
-    assert "account/logout" in js
+    assert 'data-tab="settings"' in html
+    assert 'id="account-pause"' in html
+    assert 'id="settings-pause"' in html
+    assert 'id="revoke-session"' in html
+    assert "account/pause" in js
+    assert "account/resume" in js
+    assert "account/revoke-session" in js
+    assert "user-settings" in js
     assert "autoSyncGroups" in js
     assert "groupsSyncedOnInit" in js
     assert "syncGroups({ silent: true })" in js

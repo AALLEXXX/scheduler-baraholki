@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
-from autopost_manager.models import Post, PostStatus, PublishJob, ScheduleKind
+from autopost_manager.models import Post, PostStatus, PublishJob, ScheduleKind, UserSettings
 
 
 def as_aware(value: datetime) -> datetime:
@@ -74,9 +74,11 @@ def enqueue_due_posts() -> int:
     with SessionLocal() as db:
         posts = db.scalars(
             select(Post)
+            .outerjoin(UserSettings, UserSettings.telegram_user_id == Post.created_by_telegram_id)
             .where(Post.status == PostStatus.scheduled)
             .where(Post.next_run_at.is_not(None))
             .where(Post.next_run_at <= now)
+            .where(or_(UserSettings.telegram_user_id.is_(None), UserSettings.autopost_paused.is_(False)))
         ).unique()
 
         for post in posts:

@@ -39,12 +39,14 @@ from autopost_manager.models import (
     TargetChat,
     TargetChatType,
     TelegramSession,
+    UserSettings,
 )
 from autopost_manager.schemas import (
     AccountCodeConfirm,
     AccountLoginOut,
-    AccountLogoutOut,
+    AccountPauseOut,
     AccountPasswordConfirm,
+    AccountRevokeOut,
     AccountStartLogin,
     AppConfigOut,
     AuditItemOut,
@@ -60,6 +62,7 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     TargetChatOut,
     TelegramSessionOut,
+    UserSettingsOut,
 )
 from autopost_manager.security import require_user
 from autopost_manager.telegram_client import (
@@ -68,6 +71,7 @@ from autopost_manager.telegram_client import (
     delete_messages_from_session,
     list_dialog_folders_from_session,
     list_dialogs_from_session,
+    logout_session_from_telegram,
     request_login_code,
 )
 
@@ -254,6 +258,38 @@ def active_account(
     ).first()
 
 
+def user_settings(
+    *,
+    telegram_user_id: int,
+    db: Session,
+) -> UserSettings:
+    settings = db.get(UserSettings, telegram_user_id)
+    if settings:
+        return settings
+    settings = UserSettings(telegram_user_id=telegram_user_id)
+    db.add(settings)
+    db.flush()
+    return settings
+
+
+def autopost_paused(
+    *,
+    telegram_user_id: int,
+    db: Session,
+) -> bool:
+    settings = db.get(UserSettings, telegram_user_id)
+    return bool(settings and settings.autopost_paused)
+
+
+def require_autopost_enabled(
+    *,
+    telegram_user_id: int,
+    db: Session,
+) -> None:
+    if autopost_paused(telegram_user_id=telegram_user_id, db=db):
+        raise HTTPException(status_code=409, detail="Автопостинг на паузе")
+
+
 def require_active_account(
     *,
     telegram_user_id: int,
@@ -417,6 +453,16 @@ def app_config() -> AppConfigOut:
     return AppConfigOut(bot_username=get_settings().bot_username)
 
 
+@app.get("/api/user-settings", response_model=UserSettingsOut)
+def get_user_settings(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> UserSettingsOut:
+    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
+    db.commit()
+    return UserSettingsOut(autopost_paused=settings.autopost_paused)
+
+
 @app.get("/api/sessions", response_model=list[TelegramSessionOut])
 def list_sessions(
     telegram_user_id: int = Depends(require_user),
@@ -529,6 +575,7 @@ async def confirm_account_code(
     session.username = me.username
     session.status = SessionStatus.active
     session.phone_code_hash = None
+    user_settings(telegram_user_id=telegram_user_id, db=db).autopost_paused = False
     db.commit()
     return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
@@ -552,15 +599,61 @@ async def confirm_account_password(
     session.username = me.username
     session.status = SessionStatus.active
     session.phone_code_hash = None
+    user_settings(telegram_user_id=telegram_user_id, db=db).autopost_paused = False
     db.commit()
     return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
-@app.post("/api/account/logout", response_model=AccountLogoutOut)
+def cancel_user_pending_jobs(*, telegram_user_id: int, db: Session) -> int:
+    jobs = list(
+        db.scalars(
+            select(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+            .where(PublishJob.status == JobStatus.pending)
+        )
+    )
+    for job in jobs:
+        job.status = JobStatus.cancelled
+    return len(jobs)
+
+
+@app.post("/api/account/pause", response_model=AccountPauseOut)
+def pause_account(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountPauseOut:
+    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
+    settings.autopost_paused = True
+    cancelled = cancel_user_pending_jobs(telegram_user_id=telegram_user_id, db=db)
+    db.commit()
+    return AccountPauseOut(autopost_paused=True, cancelled_jobs=cancelled)
+
+
+@app.post("/api/account/logout", response_model=AccountPauseOut)
 def logout_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
-) -> AccountLogoutOut:
+) -> AccountPauseOut:
+    return pause_account(telegram_user_id=telegram_user_id, db=db)
+
+
+@app.post("/api/account/resume", response_model=AccountPauseOut)
+def resume_account(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountPauseOut:
+    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
+    settings.autopost_paused = False
+    db.commit()
+    return AccountPauseOut(autopost_paused=False, cancelled_jobs=0)
+
+
+@app.post("/api/account/revoke-session", response_model=AccountRevokeOut)
+async def revoke_account_session(
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AccountRevokeOut:
     sessions = list(
         db.scalars(
             select(TelegramSession)
@@ -576,7 +669,12 @@ def logout_account(
         )
     )
 
+    telegram_logout_errors: list[str] = []
     for session in sessions:
+        try:
+            await logout_session_from_telegram(session)
+        except Exception as exc:
+            telegram_logout_errors.append(f"{session.id}: {exc}")
         session.status = SessionStatus.revoked
         session.phone_code_hash = None
         session.session_string = None
@@ -585,18 +683,21 @@ def logout_account(
     for chat in chats:
         chat.enabled = False
 
-    posts = list(
-        db.scalars(
-            select(Post).where(Post.created_by_telegram_id == telegram_user_id)
-        ).unique()
-    )
+    posts = list(db.scalars(select(Post).where(Post.created_by_telegram_id == telegram_user_id)).unique())
     for post in posts:
         if post.status == PostStatus.scheduled:
             post.status = PostStatus.paused
-        cancel_pending_jobs(post, db)
+    cancelled = cancel_user_pending_jobs(telegram_user_id=telegram_user_id, db=db)
+    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
+    settings.autopost_paused = True
 
     db.commit()
-    return AccountLogoutOut(revoked_sessions=len(sessions), disabled_chats=len(chats))
+    return AccountRevokeOut(
+        revoked_sessions=len(sessions),
+        disabled_chats=len(chats),
+        cancelled_jobs=cancelled,
+        telegram_logout_errors=telegram_logout_errors,
+    )
 
 
 @app.post("/api/sessions/{session_id}/sync-chats")
@@ -608,6 +709,7 @@ async def sync_session_chats(
     sender_session = db.get(TelegramSession, session_id)
     if not sender_session or sender_session.owner_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Telegram account not found")
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
 
     try:
         dialogs = await list_dialogs_from_session(sender_session)
@@ -710,6 +812,7 @@ def create_chat(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> TargetChat:
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
     if payload.session_id:
         session = db.get(TelegramSession, payload.session_id)
         if not session or session.owner_telegram_id != telegram_user_id:
@@ -757,6 +860,7 @@ def create_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
     if payload.status == PostStatus.scheduled:
         validate_post_schedule(
             schedule_kind=payload.schedule_kind,
@@ -803,6 +907,7 @@ def schedule_post(
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
 
     validate_post_schedule(
         schedule_kind=payload.schedule_kind,
@@ -850,6 +955,7 @@ def pause_post(
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
     if post.status not in {PostStatus.scheduled, PostStatus.paused}:
         raise HTTPException(status_code=409, detail="Можно поставить на паузу только пост из очереди")
 
@@ -871,6 +977,7 @@ def resume_post(
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
     if post.status != PostStatus.paused:
         raise HTTPException(status_code=409, detail="Пост не на паузе")
 
@@ -895,6 +1002,7 @@ async def delete_post(
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
 
     message_refs = collect_source_message_refs(post)
     match_texts = {post.body}
@@ -935,6 +1043,7 @@ def enqueue_now(
     if not post or post.created_by_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
+    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
 
     count = 0
     for target in post.targets:

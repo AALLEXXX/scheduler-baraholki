@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from autopost_manager import worker
 from autopost_manager.db import SessionLocal
-from autopost_manager.models import JobStatus, PublishJob, SessionStatus
+from autopost_manager.models import JobStatus, PublishJob, SessionStatus, UserSettings
 
 from conftest import make_chat, make_job, make_media, make_post, make_session
 
@@ -72,6 +72,23 @@ def test_process_one_job_success_marks_done(monkeypatch, db_session) -> None:
         assert refreshed.attempts == 1
         assert refreshed.telegram_message_id == 555
         assert refreshed.last_error is None
+
+
+def test_process_one_job_skips_globally_paused_owner(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    db_session.add(UserSettings(telegram_user_id=111, autopost_paused=True))
+    db_session.commit()
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is False
+    with SessionLocal() as db:
+        refreshed = db.get(PublishJob, job.id)
+        assert refreshed.status == JobStatus.pending
+        assert refreshed.attempts == 0
 
 
 def test_process_one_job_without_active_session_fails_job(db_session) -> None:

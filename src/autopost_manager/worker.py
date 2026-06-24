@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
-from autopost_manager.models import JobStatus, PublishJob, SessionStatus, TelegramSession
+from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
 from autopost_manager.telegram_client import classify_send_error, send_post_from_session
 
 
@@ -31,8 +31,11 @@ async def process_one_job() -> bool:
     with SessionLocal() as db:
         job = db.scalars(
             select(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .outerjoin(UserSettings, UserSettings.telegram_user_id == Post.created_by_telegram_id)
             .where(PublishJob.status == JobStatus.pending)
             .where(PublishJob.due_at <= now)
+            .where(or_(UserSettings.telegram_user_id.is_(None), UserSettings.autopost_paused.is_(False)))
             .order_by(PublishJob.due_at)
             .limit(1)
             .with_for_update(skip_locked=True)
