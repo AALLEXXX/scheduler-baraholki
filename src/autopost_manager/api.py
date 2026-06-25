@@ -514,6 +514,11 @@ def api_health() -> dict[str, object]:
 
 @app.get("/api/app-config", response_model=AppConfigOut)
 def app_config(telegram_user_id: int | None = Depends(optional_telegram_user_id)) -> AppConfigOut:
+    logger.info(
+        "Miniapp config requested: telegram_user_id=%s is_admin=%s",
+        telegram_user_id,
+        is_admin_id(telegram_user_id),
+    )
     return AppConfigOut(
         bot_username=get_settings().bot_username,
         is_admin=is_admin_id(telegram_user_id),
@@ -833,20 +838,16 @@ async def list_folders(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[DialogFolderOut]:
-    session = db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == telegram_user_id)
-        .where(TelegramSession.status == SessionStatus.active)
-        .order_by(TelegramSession.updated_at.desc())
-    ).first()
-    if not session:
+    sessions = list(
+        db.scalars(
+            select(TelegramSession)
+            .where(TelegramSession.owner_telegram_id == telegram_user_id)
+            .where(TelegramSession.status == SessionStatus.active)
+            .order_by(TelegramSession.updated_at.desc())
+        )
+    )
+    if not sessions:
         return []
-
-    try:
-        folders = await list_dialog_folders_from_session(session)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    db.commit()
 
     enabled_chat_ids = set(
         db.scalars(
@@ -855,23 +856,34 @@ async def list_folders(
             .where(TargetChat.enabled.is_(True))
         )
     )
-    rows: list[DialogFolderOut] = []
-    for folder in folders:
-        chat_ids = [
-            int(chat_id)
-            for chat_id in folder["telegram_chat_ids"]
-            if int(chat_id) in enabled_chat_ids
-        ]
-        if chat_ids:
-            rows.append(
-                DialogFolderOut(
-                    id=int(folder["id"]),
-                    title=str(folder["title"]),
-                    telegram_chat_ids=chat_ids,
-                )
-            )
-    return rows
+    rows_by_key: dict[tuple[int, str], DialogFolderOut] = {}
 
+    for session in sessions:
+        try:
+            folders = await list_dialog_folders_from_session(session)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        for folder in folders:
+            key = (int(folder["id"]), str(folder["title"]))
+            chat_ids = [
+                int(chat_id)
+                for chat_id in folder["telegram_chat_ids"]
+                if int(chat_id) in enabled_chat_ids
+            ]
+            if enabled_chat_ids and not chat_ids:
+                continue
+            if key not in rows_by_key:
+                rows_by_key[key] = DialogFolderOut(
+                    id=key[0],
+                    title=key[1],
+                    telegram_chat_ids=[],
+                )
+            current_ids = rows_by_key[key].telegram_chat_ids
+            current_ids.extend(chat_id for chat_id in chat_ids if chat_id not in current_ids)
+
+    db.commit()
+    return list(rows_by_key.values())
 
 @app.post("/api/chats", response_model=TargetChatOut)
 def create_chat(

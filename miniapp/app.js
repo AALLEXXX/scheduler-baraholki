@@ -1,5 +1,4 @@
 const tg = window.Telegram?.WebApp;
-const initData = tg?.initData || "";
 const apiBase = window.location.pathname.startsWith("/scheduler") ? "/scheduler/api" : "/api";
 const riskyChatSelectionLimit = 15;
 
@@ -60,6 +59,10 @@ function isAdmin() {
   return Boolean(state.config?.is_admin);
 }
 
+function telegramInitData() {
+  return window.Telegram?.WebApp?.initData || "";
+}
+
 function draftPosts() {
   return state.posts.filter((post) => post.status === "draft");
 }
@@ -86,7 +89,7 @@ function clearNotice() {
 function headers() {
   return {
     "Content-Type": "application/json",
-    "X-Telegram-Init-Data": initData,
+    "X-Telegram-Init-Data": telegramInitData(),
   };
 }
 

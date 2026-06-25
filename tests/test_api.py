@@ -822,6 +822,60 @@ def test_list_folders_filters_to_owned_enabled_chats(
     ]
 
 
+def test_list_folders_keeps_folder_visible_before_chats_are_synced(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    make_session(db_session, owner_id=111)
+    db_session.commit()
+
+    async def fake_folders(_session):
+        return [{"id": 7, "title": "Барахолки", "telegram_chat_ids": [-1001, -1002]}]
+
+    monkeypatch.setattr(api_module, "list_dialog_folders_from_session", fake_folders)
+    auth_user(111)
+
+    response = client.get("/api/folders")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == [{"id": 7, "title": "Барахолки", "telegram_chat_ids": []}]
+
+
+def test_list_folders_reads_all_active_user_sessions(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    newer = make_session(db_session, owner_id=111, name="newer")
+    older = make_session(db_session, owner_id=111, name="older")
+    newer.updated_at = datetime.now(UTC)
+    older.updated_at = datetime.now(UTC) - timedelta(days=1)
+    chat = make_chat(db_session, older, telegram_chat_id=-1002)
+    db_session.commit()
+
+    called_session_names: list[str] = []
+
+    async def fake_folders(session):
+        called_session_names.append(session.name)
+        if session.name == "newer":
+            return []
+        return [{"id": 9, "title": "Old account folder", "telegram_chat_ids": [chat.telegram_chat_id]}]
+
+    monkeypatch.setattr(api_module, "list_dialog_folders_from_session", fake_folders)
+    auth_user(111)
+
+    response = client.get("/api/folders")
+
+    assert response.status_code == 200, response.text
+    assert called_session_names == ["newer", "older"]
+    assert response.json() == [
+        {"id": 9, "title": "Old account folder", "telegram_chat_ids": [chat.telegram_chat_id]}
+    ]
+
+
 def test_create_post_requires_interval_session_and_group(client, auth_user, db_session) -> None:
     auth_user(111)
     session = make_session(db_session, owner_id=111)
@@ -1255,6 +1309,16 @@ def test_admin_endpoints_require_configured_admin(client, auth_user, db_session)
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Admin access required"
+
+
+def test_app_config_marks_configured_admin(client, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "7569215208")
+    api_module.app.dependency_overrides[api_module.optional_telegram_user_id] = lambda: 7569215208
+
+    response = client.get("/api/app-config")
+
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is True
 
 
 def test_admin_lists_users_with_search_and_pagination(client, auth_user, db_session, monkeypatch) -> None:

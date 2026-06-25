@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Telegram Mini App and MTProto user-session autoposting manager"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.16,<2",
   "aiogram>=3.17,<4",
   "fastapi>=0.115,<1",
   "psycopg[binary]>=3.2,<4",
@@ -29,6 +30,7 @@ autopost-bot = "autopost_manager.bot:main"
 autopost-scheduler = "autopost_manager.scheduler:main"
 autopost-worker = "autopost_manager.worker:main"
 autopost-login-session = "autopost_manager.session_login:main"
+autopost-db-upgrade = "autopost_manager.db:run_migrations"
 
 [build-system]
 requires = ["setuptools>=75", "wheel"]

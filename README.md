@@ -344,9 +344,9 @@ Worker:
 
 ```bash
 git pull --ff-only
-docker compose up -d --build api
-docker compose restart bot scheduler worker
-docker compose ps
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build api
+docker compose -f docker-compose.yml -f docker-compose.prod.yml restart bot scheduler worker
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 curl -fsS http://127.0.0.1:8000/health
 ```
 
@@ -354,6 +354,34 @@ curl -fsS http://127.0.0.1:8000/health
 что Mini App и монтируется volume-ом, и копируется в Docker image. После
 изменения `miniapp/app.js` или `miniapp/styles.css` обновляйте cache-bust версию
 в `miniapp/index.html`.
+
+## Database Migrations
+
+Проект использует Alembic. При старте сервисов `create_schema()` запускает
+`upgrade head`; для Postgres в Alembic env используется advisory lock, чтобы
+несколько контейнеров не выполняли одну миграцию одновременно.
+
+Ручной запуск миграций:
+
+```bash
+autopost-db-upgrade
+```
+
+Или напрямую:
+
+```bash
+alembic upgrade head
+```
+
+Новая миграция:
+
+```bash
+alembic revision -m "describe change"
+```
+
+После изменения моделей добавляйте миграцию в `alembic/versions` и проверяйте
+её на локальной БД до деплоя. Bootstrap-миграция `20260626_0001` совместима с
+уже существующей production-схемой и свежей пустой БД.
 
 ## Contribution Guide
 
@@ -460,6 +488,7 @@ Telegram ограничил частоту действий. Сессия пом
 
 ```text
 .
+├── alembic/                 # Alembic migrations
 ├── miniapp/                 # Telegram Mini App: HTML/CSS/JS
 ├── scripts/                 # Operational scripts and notes
 ├── src/autopost_manager/
