@@ -316,6 +316,10 @@ function mediaCountLabel(count) {
   return `${count} фото`;
 }
 
+function formatNumber(value) {
+  return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
+}
+
 function formatDateTime(value) {
   if (!value) return "нет даты";
   const date = new Date(value);
@@ -542,6 +546,7 @@ function applyTabVisibility() {
   const adminTabButton = document.querySelector("#admin-tab-button");
   if (adminTabButton) {
     adminTabButton.hidden = !isAdmin();
+    adminTabButton.classList.toggle("selected", state.activeTab === "admin");
   }
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.classList.toggle("selected", button.dataset.tab === state.activeTab);
@@ -822,22 +827,70 @@ function renderAdminStats() {
     grid.replaceChildren(emptyPost("Статистика пока не загружена"));
     return;
   }
-  const items = [
-    ["Всего отправлено", stats.sent_total],
-    ["Сегодня", stats.sent_today],
-    ["За неделю", stats.sent_week],
-    ["За месяц", stats.sent_month],
-    ["Неудачных отправок", stats.failed_total],
-    ["Всего юзеров", stats.users_total],
-    ["Активны сегодня", stats.daily_active_users],
+  const sentTotal = Number(stats.sent_total || 0);
+  const failedTotal = Number(stats.failed_total || 0);
+  const deliveredTotal = sentTotal + failedTotal;
+  const successRate = deliveredTotal > 0 ? Math.round((sentTotal / deliveredTotal) * 100) : 100;
+  const activeShare =
+    Number(stats.users_total || 0) > 0
+      ? Math.round((Number(stats.daily_active_users || 0) / Number(stats.users_total || 0)) * 100)
+      : 0;
+  const maxPeriod = Math.max(stats.sent_today || 0, stats.sent_week || 0, stats.sent_month || 0, 1);
+  const periods = [
+    ["Сегодня", stats.sent_today || 0],
+    ["Неделя", stats.sent_week || 0],
+    ["Месяц", stats.sent_month || 0],
   ];
-  grid.replaceChildren(
-    ...items.map(([label, value]) => {
+
+  grid.innerHTML = `
+    <article class="admin-stat-hero">
+      <span>Всего доставлено</span>
+      <strong data-field="sent-total"></strong>
+      <div class="stat-spark" aria-hidden="true"></div>
+      <dl>
+        <div><dt>Сегодня</dt><dd data-field="today"></dd></div>
+        <div><dt>Неделя</dt><dd data-field="week"></dd></div>
+        <div><dt>Месяц</dt><dd data-field="month"></dd></div>
+      </dl>
+    </article>
+    <article class="admin-stat-card">
+      <div class="stat-ring" style="--value: ${successRate}">
+        <strong>${successRate}%</strong>
+      </div>
+      <span>Успешность отправок</span>
+      <p>${failedTotal} ошибок из ${deliveredTotal || 0} попыток</p>
+    </article>
+    <article class="admin-stat-card">
+      <div class="stat-meter">
+        <span style="width: ${activeShare}%"></span>
+      </div>
+      <strong data-field="active-users"></strong>
+      <span>активных сегодня</span>
+      <p data-field="users-total"></p>
+    </article>
+    <article class="admin-stat-periods"></article>
+  `;
+
+  grid.querySelector('[data-field="sent-total"]').textContent = formatNumber(sentTotal);
+  grid.querySelector('[data-field="today"]').textContent = formatNumber(stats.sent_today || 0);
+  grid.querySelector('[data-field="week"]').textContent = formatNumber(stats.sent_week || 0);
+  grid.querySelector('[data-field="month"]').textContent = formatNumber(stats.sent_month || 0);
+  grid.querySelector('[data-field="active-users"]').textContent = formatNumber(stats.daily_active_users || 0);
+  grid.querySelector('[data-field="users-total"]').textContent =
+    `из ${formatNumber(stats.users_total || 0)} пользователей`;
+
+  const periodList = grid.querySelector(".admin-stat-periods");
+  periodList.replaceChildren(
+    ...periods.map(([label, value]) => {
       const item = document.createElement("div");
-      item.className = "admin-stat";
-      item.innerHTML = `<span></span><strong></strong>`;
+      item.className = "period-row";
+      item.innerHTML = `
+        <div><span></span><strong></strong></div>
+        <div class="period-bar"><span></span></div>
+      `;
       item.querySelector("span").textContent = label;
-      item.querySelector("strong").textContent = String(value ?? 0);
+      item.querySelector("strong").textContent = formatNumber(value);
+      item.querySelector(".period-bar span").style.width = `${Math.max(4, Math.round((value / maxPeriod) * 100))}%`;
       return item;
     }),
   );
@@ -1259,8 +1312,9 @@ document.querySelector("#refresh").addEventListener("click", () => {
   load({ autoSyncGroups: true }).catch((error) => notify(error.message, "error"));
 });
 
-document.querySelectorAll(".tab-button").forEach((button) => {
+document.querySelectorAll("[data-tab]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (button.dataset.tab === "admin" && !isAdmin()) return;
     state.activeTab = button.dataset.tab;
     if (state.activeTab === "audit") {
       loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));

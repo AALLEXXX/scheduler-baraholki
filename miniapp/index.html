@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260626-3" />
+    <link rel="stylesheet" href="styles.css?v=20260626-4" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -14,7 +14,12 @@
           <p class="eyebrow">Автопостинг</p>
           <h1>Барахолки</h1>
         </div>
-        <button id="refresh" class="icon-button" type="button" aria-label="Обновить">↻</button>
+        <div class="header-actions">
+          <button id="admin-tab-button" class="admin-shortcut" type="button" data-tab="admin" hidden>
+            Админка
+          </button>
+          <button id="refresh" class="icon-button" type="button" aria-label="Обновить">↻</button>
+        </div>
       </header>
 
       <div id="notice" class="notice" hidden></div>
@@ -23,7 +28,6 @@
         <button class="tab-button selected" type="button" data-tab="posts">Посты</button>
         <button class="tab-button" type="button" data-tab="audit">Аудит</button>
         <button class="tab-button" type="button" data-tab="settings">Настройки</button>
-        <button id="admin-tab-button" class="tab-button" type="button" data-tab="admin" hidden>Админка</button>
       </nav>
 
       <section class="status-panel" data-tab-panel="posts">
@@ -343,6 +347,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260626-3"></script>
+    <script src="app.js?v=20260626-4"></script>
   </body>
 </html>

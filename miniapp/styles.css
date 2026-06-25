@@ -54,6 +54,17 @@ body {
   margin-bottom: 14px;
 }
 
+.app-header > div:first-child {
+  min-width: 0;
+}
+
+.header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .eyebrow {
   margin: 0 0 2px;
   color: var(--muted);
@@ -125,6 +136,19 @@ button:disabled {
   font-size: 22px;
 }
 
+.admin-shortcut {
+  min-height: 46px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.admin-shortcut.selected {
+  border-color: color-mix(in srgb, var(--brand) 58%, transparent);
+  background: color-mix(in srgb, var(--brand) 18%, var(--surface-strong));
+}
+
 .notice {
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -141,7 +165,7 @@ button:disabled {
 
 .tab-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 14px;
   border: 1px solid var(--line);
@@ -865,17 +889,163 @@ textarea {
 
 .admin-stats-grid {
   display: grid;
+  grid-template-columns: 1.25fr 0.85fr;
+  gap: 12px;
+}
+
+.admin-stat-hero,
+.admin-stat-card,
+.admin-stat-periods,
+.admin-stat {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.admin-stat-hero {
+  position: relative;
+  grid-row: span 2;
+  gap: 16px;
+  overflow: hidden;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--brand) 18%, transparent), transparent 45%),
+    color-mix(in srgb, var(--surface-strong) 94%, transparent);
+}
+
+.admin-stat-hero > span,
+.admin-stat-card > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.admin-stat-hero > strong {
+  font-size: clamp(34px, 9vw, 58px);
+  line-height: 0.95;
+}
+
+.stat-spark {
+  height: 54px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, transparent 0 18%, color-mix(in srgb, var(--brand) 55%, transparent) 18% 22%, transparent 22% 42%, color-mix(in srgb, var(--ok) 55%, transparent) 42% 46%, transparent 46% 68%, color-mix(in srgb, var(--brand) 45%, transparent) 68% 72%, transparent 72%),
+    linear-gradient(180deg, transparent 56%, var(--line) 56% 58%, transparent 58%);
+}
+
+.admin-stat-hero dl {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.admin-stat-hero dl div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.admin-stat-hero dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.admin-stat-hero dd {
+  margin: 3px 0 0;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.admin-stat-card {
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  min-height: 170px;
+  padding: 16px;
+  text-align: center;
+}
+
+.admin-stat-card > strong {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.admin-stat-card p {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.stat-ring {
+  display: grid;
+  place-items: center;
+  width: 94px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle closest-side, var(--surface-strong) 69%, transparent 70%),
+    conic-gradient(var(--ok) calc(var(--value) * 1%), rgba(217, 45, 32, 0.22) 0);
+}
+
+.stat-ring strong {
+  font-size: 21px;
+}
+
+.stat-meter,
+.period-bar {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+.stat-meter {
+  height: 12px;
+}
+
+.stat-meter span,
+.period-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), var(--ok));
+}
+
+.admin-stat-periods {
+  gap: 12px;
+  padding: 16px;
+}
+
+.period-row {
+  display: grid;
+  gap: 7px;
+}
+
+.period-row div:first-child {
+  display: flex;
+  justify-content: space-between;
   gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.period-row strong {
+  color: var(--text);
+}
+
+.period-bar {
+  height: 10px;
 }
 
 .admin-stat {
-  display: grid;
   gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   padding: 14px;
-  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
 }
 
 .admin-stat span {
@@ -1010,6 +1180,10 @@ textarea {
     padding: 14px;
   }
 
+  .app-header {
+    align-items: flex-start;
+  }
+
   .form-grid,
   .login-action-row,
   .phone-row,
@@ -1032,6 +1206,10 @@ textarea {
 
   .admin-user-controls label {
     grid-column: auto;
+  }
+
+  .admin-stat-hero dl {
+    grid-template-columns: 1fr;
   }
 
   .post-title-row,

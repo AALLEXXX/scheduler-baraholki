@@ -849,13 +849,6 @@ async def list_folders(
     if not sessions:
         return []
 
-    enabled_chat_ids = set(
-        db.scalars(
-            select(TargetChat.telegram_chat_id)
-            .where(TargetChat.owner_telegram_id == telegram_user_id)
-            .where(TargetChat.enabled.is_(True))
-        )
-    )
     rows_by_key: dict[tuple[int, str], DialogFolderOut] = {}
 
     for session in sessions:
@@ -866,13 +859,7 @@ async def list_folders(
 
         for folder in folders:
             key = (int(folder["id"]), str(folder["title"]))
-            chat_ids = [
-                int(chat_id)
-                for chat_id in folder["telegram_chat_ids"]
-                if int(chat_id) in enabled_chat_ids
-            ]
-            if enabled_chat_ids and not chat_ids:
-                continue
+            chat_ids = [int(chat_id) for chat_id in folder["telegram_chat_ids"]]
             if key not in rows_by_key:
                 rows_by_key[key] = DialogFolderOut(
                     id=key[0],
@@ -884,6 +871,7 @@ async def list_folders(
 
     db.commit()
     return list(rows_by_key.values())
+
 
 @app.post("/api/chats", response_model=TargetChatOut)
 def create_chat(

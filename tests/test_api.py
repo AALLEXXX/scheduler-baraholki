@@ -778,7 +778,7 @@ def test_create_chat_validates_owner_and_duplicate(client, auth_user, db_session
     assert duplicate.status_code == 409
 
 
-def test_list_folders_filters_to_owned_enabled_chats(
+def test_list_folders_returns_telegram_folder_chat_ids_without_local_sync_filter(
     client,
     auth_user,
     db_session,
@@ -817,8 +817,14 @@ def test_list_folders_filters_to_owned_enabled_chats(
         {
             "id": 7,
             "title": "Барахолки",
-            "telegram_chat_ids": [first.telegram_chat_id, second.telegram_chat_id],
-        }
+            "telegram_chat_ids": [
+                first.telegram_chat_id,
+                second.telegram_chat_id,
+                disabled.telegram_chat_id,
+                -1004,
+            ],
+        },
+        {"id": 8, "title": "Пустая", "telegram_chat_ids": [-999]},
     ]
 
 
@@ -840,7 +846,7 @@ def test_list_folders_keeps_folder_visible_before_chats_are_synced(
     response = client.get("/api/folders")
 
     assert response.status_code == 200, response.text
-    assert response.json() == [{"id": 7, "title": "Барахолки", "telegram_chat_ids": []}]
+    assert response.json() == [{"id": 7, "title": "Барахолки", "telegram_chat_ids": [-1001, -1002]}]
 
 
 def test_list_folders_reads_all_active_user_sessions(

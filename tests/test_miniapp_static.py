@@ -307,9 +307,12 @@ def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
         assert f"#{element_id}" in js
 
     assert 'data-tab="admin"' in html
+    assert 'class="header-actions"' in html
+    assert 'class="admin-shortcut"' in html
     assert 'data-admin-tab="users"' in html
     assert 'data-admin-tab="stats"' in html
     assert "isAdmin()" in js
+    assert 'document.querySelectorAll("[data-tab]")' in js
     assert 'api(`admin/users?page=${state.adminUsers.page}' in js
     assert 'api("admin/stats")' in js
     assert 'api(`admin/users/${telegramUserId}`' in js
@@ -318,6 +321,8 @@ def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
     assert "Остановить" in js
     assert ".admin-list" in css
     assert ".admin-stats-grid" in css
+    assert ".admin-stat-hero" in css
+    assert ".stat-ring" in css
 
 
 def test_miniapp_cache_bust_versions_match_for_css_and_js() -> None:
