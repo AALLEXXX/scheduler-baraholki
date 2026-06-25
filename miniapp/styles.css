@@ -33,6 +33,7 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(36, 129, 204, 0.18), transparent 34rem),
     linear-gradient(180deg, rgba(24, 160, 88, 0.08), transparent 18rem),
@@ -44,6 +45,7 @@ body {
   width: min(100%, 980px);
   margin: 0 auto;
   padding: 18px;
+  overflow: hidden;
 }
 
 .app-header {
@@ -197,14 +199,14 @@ button:disabled {
 }
 
 .status-panel {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   padding: 12px 14px;
 }
 
-.status-panel > div {
+.status-panel > div:first-child {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 10px;
@@ -235,6 +237,7 @@ button:disabled {
 #account-title {
   font-weight: 800;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 #account-subtitle {
@@ -242,25 +245,27 @@ button:disabled {
   font-size: 13px;
   font-weight: 650;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .status-actions {
   display: flex;
   gap: 8px;
+  min-width: 0;
   flex: 0 0 auto;
   justify-content: flex-end;
 }
 
 #account-pause {
   min-height: 36px;
+  max-width: 100%;
   padding: 0 14px;
+  white-space: nowrap;
 }
 
 .panel {
   padding: 16px;
+  overflow: hidden;
 }
 
 .settings-list {
@@ -395,6 +400,7 @@ button:disabled {
 .stack {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .draft-instruction {
@@ -547,6 +553,7 @@ textarea {
 
 .composer-panel {
   position: relative;
+  overflow: hidden;
 }
 
 .composer-title-row,
@@ -606,6 +613,7 @@ textarea {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 13px;
@@ -619,6 +627,7 @@ textarea {
 .folder-list {
   display: flex;
   gap: 8px;
+  max-width: 100%;
   margin: 0 0 10px;
   overflow-x: auto;
   padding-bottom: 2px;
@@ -685,13 +694,19 @@ textarea {
 .chip-grid {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .group-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+  min-width: 0;
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -702,7 +717,15 @@ textarea {
   font-weight: 750;
 }
 
+.group-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .group-chip input {
+  flex: 0 0 auto;
   width: 16px;
   min-height: 16px;
 }
@@ -774,12 +797,14 @@ textarea {
 
 .post-title-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .post-item p {
+  min-width: 0;
   white-space: pre-wrap;
   font-weight: 700;
   line-height: 1.35;
@@ -1400,6 +1425,19 @@ textarea {
     width: 100%;
   }
 
+  .status-panel {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .status-actions {
+    justify-content: stretch;
+  }
+
+  #account-pause {
+    width: 100%;
+  }
+
   .draft-card,
   .post-item,
   .admin-user,
@@ -1419,7 +1457,6 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .post-title-row,
   .audit-item-head {
     display: grid;
     justify-content: stretch;

@@ -156,6 +156,7 @@ def test_miniapp_queue_has_details_editing_and_precise_pause_controls() -> None:
     assert ".post-meta" in css
     assert ".post-icon-button" in css
     assert ".post-status-icon" in css
+    assert ".post-title-row,\n  .audit-item-head" not in css
     assert ".post-item.scheduled" in css
     assert ".modal-backdrop" in css
     assert ".modal-close" in css
@@ -238,6 +239,22 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "renderEditFolderPicker();" in js
     assert ".pagination" in css
     assert "[hidden]" in css
+    assert ".group-chip span" in css
+    assert "text-overflow: ellipsis" in css
+    assert ".chip-grid" in css
+    assert "overflow: hidden" in css
+
+
+def test_miniapp_mobile_layout_keeps_status_and_form_inside_viewport() -> None:
+    css = read("styles.css")
+
+    assert "body" in css
+    assert "overflow-x: hidden" in css
+    assert ".status-panel {\n  display: grid;" in css
+    assert ".status-panel {\n    grid-template-columns: minmax(0, 1fr);" in css
+    assert "#account-subtitle" in css
+    assert "overflow-wrap: anywhere" in css
+    assert ".panel {\n  padding: 16px;\n  overflow: hidden;" in css
 
 
 def test_miniapp_warns_when_selecting_more_than_fifteen_chats() -> None:
