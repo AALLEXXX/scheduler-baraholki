@@ -10,7 +10,7 @@ import uvicorn
 from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from telethon.errors import (
     FloodWaitError,
@@ -34,6 +34,7 @@ from autopost_manager.models import (
     PostStatus,
     PostTarget,
     PublishJob,
+    RateLimitEvent,
     ScheduleKind,
     SessionStatus,
     TargetChat,
@@ -83,8 +84,29 @@ from autopost_manager.telegram_client import (
 
 logger = logging.getLogger(__name__)
 LOGIN_CODE_COOLDOWN_SECONDS = 90
+RATE_LIMIT_LOGIN_START_WINDOW_SECONDS = 10 * 60
+RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS = 15 * 60
+RATE_LIMIT_LOGIN_START_ATTEMPTS = 3
+RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS = 5
 
 app = FastAPI(title="Autopost Manager")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self' https://telegram.org https://*.telegram.org; "
+        "script-src 'self' 'unsafe-inline' https://telegram.org; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://*.telegram.org https://api.telegram.org; "
+        "connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org;",
+    )
+    return response
 
 
 def login_error_detail(stage: str, exc: Exception) -> str:
@@ -111,7 +133,7 @@ def login_error_detail(stage: str, exc: Exception) -> str:
         "confirm-code": "Не удалось подтвердить код Telegram",
         "confirm-password": "Не удалось подтвердить пароль 2FA",
     }.get(stage, "Telegram вернул ошибку")
-    return f"{prefix}: {exc}"
+    return f"{prefix}. Попробуйте позже или проверьте данные."
 
 
 def login_code_message(delivery_type: str | None, *, force_sms: bool) -> str:
@@ -151,8 +173,19 @@ def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> N
     raise HTTPException(status_code=422, detail=login_error_detail(stage, exc)) from exc
 
 
+def validate_runtime_settings() -> None:
+    settings = get_settings()
+    if settings.app_env != "local" and settings.allow_local_auth_bypass:
+        raise RuntimeError("ALLOW_LOCAL_AUTH_BYPASS must be disabled outside local")
+    if settings.app_env != "local" and not settings.app_encryption_key:
+        raise RuntimeError("APP_ENCRYPTION_KEY is required outside local")
+    if settings.allow_local_auth_bypass and not settings.local_dev_user_id:
+        raise RuntimeError("LOCAL_DEV_USER_ID is required when local auth bypass is enabled")
+
+
 @app.on_event("startup")
 def startup() -> None:
+    validate_runtime_settings()
     create_schema()
     get_settings().telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -303,7 +336,12 @@ def is_admin_id(telegram_user_id: int | None) -> bool:
     if telegram_user_id is None:
         return False
     settings = get_settings()
-    if settings.app_env == "local" and not settings.admin_ids:
+    if (
+        settings.app_env == "local"
+        and settings.allow_local_auth_bypass
+        and not settings.admin_ids
+        and telegram_user_id == settings.local_dev_user_id
+    ):
         return True
     return telegram_user_id in settings.admin_ids
 
@@ -312,12 +350,16 @@ def optional_telegram_user_id(
     x_telegram_init_data: str | None = Header(default=None),
 ) -> int | None:
     settings = get_settings()
-    if settings.app_env == "local" and not x_telegram_init_data:
-        return 0
+    if settings.app_env == "local" and settings.allow_local_auth_bypass and not x_telegram_init_data:
+        return settings.local_dev_user_id
     if not x_telegram_init_data:
         return None
     try:
-        return verify_webapp_init_data(x_telegram_init_data, settings.bot_token)
+        return verify_webapp_init_data(
+            x_telegram_init_data,
+            settings.bot_token,
+            max_age_seconds=settings.telegram_init_data_max_age_seconds,
+        )
     except ValueError:
         return None
 
@@ -331,6 +373,45 @@ def require_admin_user(telegram_user_id: int = Depends(require_user)) -> int:
 def day_start() -> datetime:
     now = datetime.now(UTC)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def tomorrow_start() -> datetime:
+    return day_start() + timedelta(days=1)
+
+
+def check_rate_limit(
+    db: Session,
+    *,
+    scope: str,
+    key: str,
+    limit: int,
+    window_seconds: int,
+) -> None:
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(seconds=window_seconds)
+    db.execute(
+        delete(RateLimitEvent)
+        .where(RateLimitEvent.scope == scope)
+        .where(RateLimitEvent.created_at < cutoff)
+    )
+    count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(RateLimitEvent)
+            .where(RateLimitEvent.scope == scope)
+            .where(RateLimitEvent.key == key)
+            .where(RateLimitEvent.created_at >= cutoff)
+        )
+        or 0
+    )
+    if count >= limit:
+        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
+    db.add(RateLimitEvent(scope=scope, key=key, created_at=now))
+
+
+def normalize_phone_key(phone: str) -> str:
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return digits[-12:] if digits else "unknown"
 
 
 def sent_since(db: Session, *, telegram_user_id: int | None = None, since: datetime | None = None) -> int:
@@ -366,6 +447,70 @@ def require_autopost_enabled(
     if settings and settings.daily_send_limit is not None:
         if sent_since(db, telegram_user_id=telegram_user_id, since=day_start()) >= settings.daily_send_limit:
             raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
+
+
+def active_scheduled_posts_count(db: Session, telegram_user_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Post)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+            .where(Post.status == PostStatus.scheduled)
+        )
+        or 0
+    )
+
+
+def user_sessions_count(db: Session, telegram_user_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(TelegramSession)
+            .where(TelegramSession.owner_telegram_id == telegram_user_id)
+            .where(TelegramSession.status != SessionStatus.revoked)
+        )
+        or 0
+    )
+
+
+def enforce_active_post_limit(
+    db: Session,
+    telegram_user_id: int,
+    *,
+    current_post: Post | None = None,
+) -> None:
+    settings = get_settings()
+    count = active_scheduled_posts_count(db, telegram_user_id)
+    if current_post and current_post.status == PostStatus.scheduled:
+        count -= 1
+    if count >= settings.max_active_posts_per_user:
+        raise HTTPException(status_code=429, detail="Достигнут лимит активных запланированных постов")
+
+
+def enforce_daily_job_creation_limit(db: Session, telegram_user_id: int, jobs_to_create: int) -> None:
+    settings = get_settings()
+    today_jobs = int(
+        db.scalar(
+            select(func.count())
+            .select_from(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+            .where(PublishJob.created_at >= day_start())
+        )
+        or 0
+    )
+    if today_jobs + jobs_to_create > settings.max_jobs_per_user_per_day:
+        raise HTTPException(status_code=429, detail="Достигнут дневной лимит постановки задач в очередь")
+
+
+def mask_phone(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    prefix = "+" if phone.startswith("+") else ""
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) <= 4:
+        return f"{prefix}{'*' * len(digits)}"
+    return f"{prefix}{digits[:2]}{'*' * max(3, len(digits) - 6)}{digits[-4:]}"
 
 
 def require_active_account(
@@ -481,6 +626,11 @@ def validate_post_schedule(
         raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
     if not target_chat_ids:
         raise HTTPException(status_code=422, detail="Выберите хотя бы одну группу")
+    if len(set(target_chat_ids)) > get_settings().max_targets_per_post:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Можно выбрать не больше {get_settings().max_targets_per_post} групп на один пост",
+        )
 
 
 def validate_owned_session_and_targets(
@@ -570,6 +720,13 @@ async def start_account_login(
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
     settings = get_settings()
+    check_rate_limit(
+        db,
+        scope="login:start",
+        key=f"{telegram_user_id}:{normalize_phone_key(payload.phone)}",
+        limit=RATE_LIMIT_LOGIN_START_ATTEMPTS,
+        window_seconds=RATE_LIMIT_LOGIN_START_WINDOW_SECONDS,
+    )
     safe_phone = "".join(ch for ch in payload.phone if ch.isdigit())
     session_name = f"tg_{telegram_user_id}_{safe_phone[-8:] or 'account'}"
     session_path = str(settings.telegram_sessions_dir / session_name)
@@ -580,6 +737,8 @@ async def start_account_login(
         .where(TelegramSession.phone == payload.phone)
     ).first()
     if not session:
+        if user_sessions_count(db, telegram_user_id) >= settings.max_sessions_per_user:
+            raise HTTPException(status_code=429, detail="Достигнут лимит Telegram-аккаунтов")
         session = TelegramSession(
             owner_telegram_id=telegram_user_id,
             name=session_name,
@@ -597,23 +756,24 @@ async def start_account_login(
         session.api_hash = settings.telegram_api_hash
         session.session_path = session.session_path or session_path
 
-    cooldown_seconds = remaining_login_code_cooldown(session) if payload.force_sms else 0
+    cooldown_seconds = remaining_login_code_cooldown(session)
     if cooldown_seconds:
         raise HTTPException(
             status_code=429,
-            detail=f"Повторно запросить SMS можно через {cooldown_seconds} сек.",
+            detail=f"Повторно запросить код можно через {cooldown_seconds} сек.",
         )
+    db.commit()
 
     try:
         code_request = await request_login_code(session, force_sms=payload.force_sms)
     except Exception as exc:
-        db.rollback()
+        session.phone_code_hash = None
+        db.commit()
         raise_login_error("start-login", session, exc)
 
     session.phone_code_hash = code_request.phone_code_hash
     session.status = SessionStatus.code_needed
-    if payload.force_sms:
-        session.last_code_requested_at = datetime.now(UTC)
+    session.last_code_requested_at = datetime.now(UTC)
     logger.warning(
         "Telegram login code requested: session_id=%s owner=%s delivery_type=%s next_delivery_type=%s force_sms=%s timeout=%s",
         session.id,
@@ -642,10 +802,19 @@ async def confirm_account_code(
     session = db.get(TelegramSession, payload.session_id)
     if not session or session.owner_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Telegram account not found")
+    check_rate_limit(
+        db,
+        scope="login:code",
+        key=str(session.id),
+        limit=RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS,
+        window_seconds=RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS,
+    )
 
     try:
         completed, me = await confirm_login_code(session, payload.code)
     except Exception as exc:
+        session.phone_code_hash = None
+        db.commit()
         raise_login_error("confirm-code", session, exc)
 
     if not completed:
@@ -675,10 +844,19 @@ async def confirm_account_password(
     session = db.get(TelegramSession, payload.session_id)
     if not session or session.owner_telegram_id != telegram_user_id:
         raise HTTPException(status_code=404, detail="Telegram account not found")
+    check_rate_limit(
+        db,
+        scope="login:password",
+        key=str(session.id),
+        limit=RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS,
+        window_seconds=RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS,
+    )
 
     try:
         me = await confirm_login_password(session, payload.password)
     except Exception as exc:
+        session.phone_code_hash = None
+        db.commit()
         raise_login_error("confirm-password", session, exc)
 
     session.telegram_user_id = me.id
@@ -800,7 +978,8 @@ async def sync_session_chats(
     try:
         dialogs = await list_dialogs_from_session(sender_session)
     except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.warning("Telegram dialog sync failed: session_id=%s error=%s", sender_session.id, exc)
+        raise HTTPException(status_code=409, detail="Не удалось синхронизировать чаты Telegram") from exc
 
     imported = 0
     for dialog in dialogs:
@@ -869,7 +1048,8 @@ async def list_folders(
         try:
             folders = await list_dialog_folders_from_session(session)
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            logger.warning("Telegram folder sync failed: session_id=%s error=%s", session.id, exc)
+            raise HTTPException(status_code=409, detail="Не удалось синхронизировать папки Telegram") from exc
 
         for folder in folders:
             key = (int(folder["id"]), str(folder["title"]))
@@ -893,26 +1073,10 @@ def create_chat(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> TargetChat:
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    if payload.session_id:
-        session = db.get(TelegramSession, payload.session_id)
-        if not session or session.owner_telegram_id != telegram_user_id:
-            raise HTTPException(status_code=404, detail="Telegram account not found")
-
-    existing = db.scalars(
-        select(TargetChat)
-        .where(TargetChat.session_id == payload.session_id)
-        .where(TargetChat.owner_telegram_id == telegram_user_id)
-        .where(TargetChat.telegram_chat_id == payload.telegram_chat_id)
-    ).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="This destination group is already added")
-
-    chat = TargetChat(**payload.model_dump(), owner_telegram_id=telegram_user_id)
-    db.add(chat)
-    db.commit()
-    db.refresh(chat)
-    return chat
+    raise HTTPException(
+        status_code=410,
+        detail="Ручное добавление групп отключено. Используйте синхронизацию чатов Telegram.",
+    )
 
 
 @app.get("/api/posts", response_model=list[PostOut])
@@ -943,6 +1107,7 @@ def create_post(
 ) -> PostOut:
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
     if payload.status == PostStatus.scheduled:
+        enforce_active_post_limit(db, telegram_user_id)
         validate_post_schedule(
             schedule_kind=payload.schedule_kind,
             next_run_at=payload.next_run_at,
@@ -989,6 +1154,9 @@ def schedule_post(
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
+    enforce_active_post_limit(db, telegram_user_id, current_post=post)
+    if len(post.media_items) > get_settings().max_media_items_per_post:
+        raise HTTPException(status_code=422, detail="Слишком много медиа в одном посте")
 
     validate_post_schedule(
         schedule_kind=payload.schedule_kind,
@@ -1125,9 +1293,23 @@ def enqueue_now(
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
+    if len({target.target_chat_id for target in post.targets}) > get_settings().max_targets_per_post:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Можно выбрать не больше {get_settings().max_targets_per_post} групп на один пост",
+        )
+    enforce_daily_job_creation_limit(db, telegram_user_id, len(post.targets))
 
     count = 0
     for target in post.targets:
+        existing = db.scalars(
+            select(PublishJob)
+            .where(PublishJob.post_id == post.id)
+            .where(PublishJob.target_chat_id == target.target_chat_id)
+            .where(PublishJob.status.in_([JobStatus.pending, JobStatus.processing]))
+        ).first()
+        if existing:
+            continue
         db.add(
             PublishJob(
                 post_id=post.id,
@@ -1247,7 +1429,8 @@ async def get_audit_message(
             message_id=job.telegram_message_id,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.warning("Telegram audit message lookup failed: job_id=%s error=%s", job.id, exc)
+        raise HTTPException(status_code=409, detail="Не удалось получить сообщение из Telegram") from exc
 
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in Telegram chat")
@@ -1271,7 +1454,7 @@ def admin_user_out(db: Session, telegram_user_id: int) -> AdminUserOut:
     return AdminUserOut(
         telegram_user_id=telegram_user_id,
         username=session.username if session else None,
-        phone=session.phone if session else None,
+        phone=mask_phone(session.phone if session else None),
         session_status=session.status if session else None,
         autopost_paused=bool(settings and settings.autopost_paused),
         banned=bool(settings and settings.banned),

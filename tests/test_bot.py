@@ -38,9 +38,9 @@ class FakeMessage:
         return SimpleNamespace(chat=self.chat, message_id=self.message_id + 1000)
 
 
-def test_admin_only_requires_telegram_user() -> None:
-    assert bot_module.admin_only(FakeMessage(from_user=object())) is True
-    assert bot_module.admin_only(FakeMessage(from_user=None)) is False
+def test_has_telegram_user_requires_sender() -> None:
+    assert bot_module.has_telegram_user(FakeMessage(from_user=object())) is True
+    assert bot_module.has_telegram_user(FakeMessage(from_user=None)) is False
 
 
 def test_start_sends_mini_app_button(monkeypatch) -> None:

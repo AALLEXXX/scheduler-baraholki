@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     mini_app_url: str = "http://localhost:8000/miniapp/"
     miniapp_dir: Path = Path("/app/miniapp")
     app_secret: str = Field(min_length=16)
+    app_encryption_key: str | None = None
+    allow_local_auth_bypass: bool = False
+    local_dev_user_id: int = 0
+    telegram_init_data_max_age_seconds: int = 21600
 
     bot_token: str = Field(min_length=20)
     bot_username: str = "scheduler_baraholki_bot"
@@ -28,6 +32,13 @@ class Settings(BaseSettings):
     scheduler_tick_seconds: int = 15
     worker_tick_seconds: int = 5
     default_min_send_interval_seconds: int = 30
+    max_sessions_per_user: int = 3
+    max_targets_per_post: int = 15
+    max_active_posts_per_user: int = 50
+    max_jobs_per_user_per_day: int = 300
+    max_media_items_per_post: int = 10
+    max_bot_file_bytes: int = 25 * 1024 * 1024
+    telegram_operation_timeout_seconds: int = 60
 
     @property
     def admin_ids(self) -> set[int]:

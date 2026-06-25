@@ -17,6 +17,7 @@ from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from telethon.sessions import SQLiteSession, StringSession
 
 from autopost_manager.config import get_settings
+from autopost_manager.crypto import decrypt_session_string, encrypt_session_string
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
 
 _locks: dict[str, asyncio.Lock] = {}
@@ -62,9 +63,11 @@ def build_client(session: TelegramSession) -> TelegramClient:
     settings = get_settings()
     api_id = session.api_id or settings.telegram_api_id
     api_hash = session.api_hash or settings.telegram_api_hash
-    session_string = session.session_string or legacy_session_string(session.session_path)
-    if session_string and session_string != session.session_string:
-        session.session_string = session_string
+    session_string = decrypt_session_string(session.session_string)
+    legacy_string = legacy_session_string(session.session_path) if not session_string else ""
+    if legacy_string:
+        session_string = legacy_string
+        session.session_string = encrypt_session_string(legacy_string)
     return TelegramClient(StringSession(session_string or ""), api_id, api_hash)
 
 
@@ -87,7 +90,19 @@ def remember_client_session(session: TelegramSession, client) -> None:
         return
     session_string = StringSession.save(client_session)
     if session_string:
-        session.session_string = session_string
+        session.session_string = encrypt_session_string(session_string)
+
+
+async def telegram_timeout(awaitable, timeout_seconds: int | None = None):
+    timeout = timeout_seconds or get_settings().telegram_operation_timeout_seconds
+    return await asyncio.wait_for(awaitable, timeout=timeout)
+
+
+async def disconnect_client(client) -> None:
+    try:
+        await asyncio.wait_for(client.disconnect(), timeout=10)
+    except Exception:
+        pass
 
 
 async def send_message_from_session(
@@ -106,16 +121,18 @@ async def send_message_from_session(
                 await asyncio.sleep(wait_seconds)
 
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 session.status = SessionStatus.needs_login
                 db.commit()
                 raise RuntimeError("Telegram session needs login")
-            message = await client.send_message(chat_id, text, parse_mode=parse_mode)
+            message = await telegram_timeout(
+                client.send_message(chat_id, text, parse_mode=parse_mode),
+            )
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
         session.last_send_at = datetime.now(UTC)
         session.status = SessionStatus.active
@@ -168,10 +185,10 @@ async def send_media_from_session(
                 await asyncio.sleep(wait_seconds)
 
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         temp_files: list[str] = []
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 session.status = SessionStatus.needs_login
                 db.commit()
                 raise RuntimeError("Telegram session needs login")
@@ -187,14 +204,16 @@ async def send_media_from_session(
 
             if source_message_ids:
                 bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
-                entity = await client.get_entity(bot_peer)
-                sent = await client.forward_messages(
-                    chat_id,
-                    messages=source_message_ids[0]
-                    if len(source_message_ids) == 1
-                    else source_message_ids,
-                    from_peer=entity,
-                    drop_author=True,
+                entity = await telegram_timeout(client.get_entity(bot_peer), 20)
+                sent = await telegram_timeout(
+                    client.forward_messages(
+                        chat_id,
+                        messages=source_message_ids[0]
+                        if len(source_message_ids) == 1
+                        else source_message_ids,
+                        from_peer=entity,
+                        drop_author=True,
+                    )
                 )
             else:
                 files = [media.file_id for media in media_items]
@@ -222,7 +241,7 @@ async def send_media_from_session(
             for temp_file in temp_files:
                 Path(temp_file).unlink(missing_ok=True)
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
         session.last_send_at = datetime.now(UTC)
         session.status = SessionStatus.active
@@ -241,7 +260,7 @@ async def find_forwardable_source_message_ids(
         return []
 
     bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
-    entity = await client.get_entity(bot_peer)
+    entity = await telegram_timeout(client.get_entity(bot_peer), 20)
     normalized_text = normalize_plain_text(text)
     if not normalized_text:
         return []
@@ -249,24 +268,25 @@ async def find_forwardable_source_message_ids(
     single_candidates: list[tuple[float, list[int]]] = []
     grouped: dict[int, list] = {}
 
-    async for message in client.iter_messages(entity, limit=160):
-        if not is_outgoing_message(message):
-            continue
-        if not near_datetime(getattr(message, "date", None), created_at):
-            continue
-        if not getattr(message, "media", None):
-            continue
+    async with asyncio.timeout(get_settings().telegram_operation_timeout_seconds):
+        async for message in client.iter_messages(entity, limit=160):
+            if not is_outgoing_message(message):
+                continue
+            if not near_datetime(getattr(message, "date", None), created_at):
+                continue
+            if not getattr(message, "media", None):
+                continue
 
-        grouped_id = getattr(message, "grouped_id", None)
-        if grouped_id:
-            grouped.setdefault(int(grouped_id), []).append(message)
-            continue
+            grouped_id = getattr(message, "grouped_id", None)
+            if grouped_id:
+                grouped.setdefault(int(grouped_id), []).append(message)
+                continue
 
-        raw_text = normalize_plain_text(
-            getattr(message, "raw_text", None) or getattr(message, "message", None)
-        )
-        if media_count == 1 and raw_text == normalized_text:
-            single_candidates.append((message_distance(message, created_at), [int(message.id)]))
+            raw_text = normalize_plain_text(
+                getattr(message, "raw_text", None) or getattr(message, "message", None)
+            )
+            if media_count == 1 and raw_text == normalized_text:
+                single_candidates.append((message_distance(message, created_at), [int(message.id)]))
 
     for messages in grouped.values():
         if len(messages) != media_count:
@@ -310,14 +330,17 @@ async def send_files_with_optional_text(
     parse_mode: str | None,
 ):
     caption = text if text and len(text) <= 1024 else None
-    sent = await client.send_file(
-        chat_id,
-        files[0] if len(files) == 1 else files,
-        caption=caption,
-        parse_mode=parse_mode,
+    sent = await telegram_timeout(
+        client.send_file(
+            chat_id,
+            files[0] if len(files) == 1 else files,
+            caption=caption,
+            parse_mode=parse_mode,
+        ),
+        180,
     )
     if text and not caption:
-        text_message = await client.send_message(chat_id, text, parse_mode=parse_mode)
+        text_message = await telegram_timeout(client.send_message(chat_id, text, parse_mode=parse_mode))
         return text_message
     return sent
 
@@ -336,7 +359,9 @@ async def download_bot_file(file_id: str, media_type: str) -> str:
         "animation": ".mp4",
         "document": "",
     }
-    async with aiohttp.ClientSession() as http:
+    max_bytes = get_settings().max_bot_file_bytes
+    timeout = aiohttp.ClientTimeout(total=120, sock_connect=20, sock_read=30)
+    async with aiohttp.ClientSession(timeout=timeout) as http:
         async with http.get(
             f"https://api.telegram.org/bot{settings.bot_token}/getFile",
             params={"file_id": file_id},
@@ -355,7 +380,16 @@ async def download_bot_file(file_id: str, media_type: str) -> str:
         ) as response:
             if response.status >= 400:
                 raise RuntimeError(f"Could not download Telegram file: HTTP {response.status}")
-            Path(temp_path).write_bytes(await response.read())
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_bytes:
+                raise RuntimeError("Telegram file is too large")
+            downloaded = 0
+            with Path(temp_path).open("wb") as output:
+                async for chunk in response.content.iter_chunked(1024 * 256):
+                    downloaded += len(chunk)
+                    if downloaded > max_bytes:
+                        raise RuntimeError("Telegram file is too large")
+                    output.write(chunk)
 
     return temp_path
 
@@ -374,11 +408,11 @@ async def delete_messages_from_session(
 
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 raise RuntimeError("Telegram session needs login")
-            entity = await client.get_entity(peer)
+            entity = await telegram_timeout(client.get_entity(peer), 20)
             matched_ids = await find_dialog_message_ids(
                 client=client,
                 entity=entity,
@@ -388,10 +422,10 @@ async def delete_messages_from_session(
                 media_count=media_count,
             )
             ids_to_delete = matched_ids or set(message_ids)
-            await client.delete_messages(entity, sorted(ids_to_delete), revoke=True)
+            await telegram_timeout(client.delete_messages(entity, sorted(ids_to_delete), revoke=True))
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
     return len(ids_to_delete)
 
 
@@ -402,11 +436,11 @@ async def get_message_from_session(
 ) -> TelegramMessageSnapshot | None:
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 raise RuntimeError("Telegram session needs login")
-            message = await client.get_messages(peer, ids=message_id)
+            message = await telegram_timeout(client.get_messages(peer, ids=message_id), 30)
             if not message:
                 return None
             return TelegramMessageSnapshot(
@@ -418,7 +452,7 @@ async def get_message_from_session(
             )
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
 
 def normalize_plain_text(value: str | None) -> str:
@@ -451,29 +485,30 @@ async def find_dialog_message_ids(
     ack_candidates: list[tuple[datetime | None, int]] = []
     media_candidates: list[tuple[float, int]] = []
 
-    async for message in client.iter_messages(entity, limit=120):
-        if not near_datetime(getattr(message, "date", None), created_at):
-            continue
+    async with asyncio.timeout(get_settings().telegram_operation_timeout_seconds):
+        async for message in client.iter_messages(entity, limit=120):
+            if not near_datetime(getattr(message, "date", None), created_at):
+                continue
 
-        raw_text = normalize_plain_text(
-            getattr(message, "raw_text", None) or getattr(message, "message", None)
-        )
-        if raw_text and raw_text in normalized_texts:
-            message_id = int(message.id)
-            matched_ids.add(message_id)
-            source_candidates.append((getattr(message, "date", None), message_id))
-        elif raw_text and normalized_ack_text and raw_text == normalized_ack_text:
-            ack_candidates.append((getattr(message, "date", None), int(message.id)))
+            raw_text = normalize_plain_text(
+                getattr(message, "raw_text", None) or getattr(message, "message", None)
+            )
+            if raw_text and raw_text in normalized_texts:
+                message_id = int(message.id)
+                matched_ids.add(message_id)
+                source_candidates.append((getattr(message, "date", None), message_id))
+            elif raw_text and normalized_ack_text and raw_text == normalized_ack_text:
+                ack_candidates.append((getattr(message, "date", None), int(message.id)))
 
-        if media_count and getattr(message, "media", None):
-            distance = 0.0
-            message_date = getattr(message, "date", None)
-            if message_date and created_at:
-                if message_date.tzinfo is None:
-                    message_date = message_date.replace(tzinfo=UTC)
-                reference = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
-                distance = abs((message_date - reference).total_seconds())
-            media_candidates.append((distance, int(message.id)))
+            if media_count and getattr(message, "media", None):
+                distance = 0.0
+                message_date = getattr(message, "date", None)
+                if message_date and created_at:
+                    if message_date.tzinfo is None:
+                        message_date = message_date.replace(tzinfo=UTC)
+                    reference = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+                    distance = abs((message_date - reference).total_seconds())
+                media_candidates.append((distance, int(message.id)))
 
     for _distance, message_id in sorted(media_candidates)[:media_count]:
         matched_ids.add(message_id)
@@ -569,23 +604,24 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
     async with session_lock(session.session_path):
         client = build_client(session)
         dialogs: list[dict[str, object]] = []
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 raise RuntimeError("Telegram session needs login")
 
-            async for dialog in client.iter_dialogs(limit=300):
-                if not (dialog.is_group or dialog.is_channel):
-                    continue
-                dialogs.append(
-                    {
-                        "telegram_chat_id": int(dialog.id),
-                        "is_group": bool(dialog.is_group),
-                        "is_channel": bool(dialog.is_channel),
-                    }
-                )
+            async with asyncio.timeout(get_settings().telegram_operation_timeout_seconds):
+                async for dialog in client.iter_dialogs(limit=300):
+                    if not (dialog.is_group or dialog.is_channel):
+                        continue
+                    dialogs.append(
+                        {
+                            "telegram_chat_id": int(dialog.id),
+                            "is_group": bool(dialog.is_group),
+                            "is_channel": bool(dialog.is_channel),
+                        }
+                    )
 
-            folder_response = await client(functions.messages.GetDialogFiltersRequest())
+            folder_response = await telegram_timeout(client(functions.messages.GetDialogFiltersRequest()))
             folders = getattr(folder_response, "filters", folder_response)
             rows: list[dict[str, object]] = []
             for folder in folders:
@@ -604,7 +640,7 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
             return rows
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
 
 def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:
@@ -619,39 +655,43 @@ async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, 
     async with session_lock(session.session_path):
         client = build_client(session)
         rows: list[dict[str, object]] = []
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if not await client.is_user_authorized():
+            if not await telegram_timeout(client.is_user_authorized(), 20):
                 raise RuntimeError("Telegram session needs login")
 
-            async for dialog in client.iter_dialogs(limit=300):
-                if not (dialog.is_group or dialog.is_channel):
-                    continue
-                entity = dialog.entity
-                rows.append(
-                    {
-                        "telegram_chat_id": int(dialog.id),
-                        "title": dialog.name,
-                        "username": getattr(entity, "username", None),
-                        "is_group": bool(dialog.is_group),
-                        "is_channel": bool(dialog.is_channel),
-                    }
-                )
+            async with asyncio.timeout(get_settings().telegram_operation_timeout_seconds):
+                async for dialog in client.iter_dialogs(limit=300):
+                    if not (dialog.is_group or dialog.is_channel):
+                        continue
+                    entity = dialog.entity
+                    rows.append(
+                        {
+                            "telegram_chat_id": int(dialog.id),
+                            "title": dialog.name,
+                            "username": getattr(entity, "username", None),
+                            "is_group": bool(dialog.is_group),
+                            "is_channel": bool(dialog.is_channel),
+                        }
+                    )
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
         return rows
 
 
 async def request_login_code(session: TelegramSession, *, force_sms: bool = False) -> LoginCodeRequest:
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            sent_code = await client.send_code_request(session.phone, force_sms=force_sms)
+            sent_code = await telegram_timeout(
+                client.send_code_request(session.phone, force_sms=force_sms),
+                30,
+            )
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
         next_type = getattr(sent_code, "next_type", None)
         return LoginCodeRequest(
             phone_code_hash=sent_code.phone_code_hash,
@@ -664,41 +704,44 @@ async def request_login_code(session: TelegramSession, *, force_sms: bool = Fals
 async def confirm_login_code(session: TelegramSession, code: str) -> tuple[bool, object | None]:
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
             try:
-                await client.sign_in(
-                    phone=session.phone,
-                    code=code,
-                    phone_code_hash=session.phone_code_hash,
+                await telegram_timeout(
+                    client.sign_in(
+                        phone=session.phone,
+                        code=code,
+                        phone_code_hash=session.phone_code_hash,
+                    ),
+                    30,
                 )
             except SessionPasswordNeededError:
                 return False, None
-            me = await client.get_me()
+            me = await telegram_timeout(client.get_me(), 20)
             return True, me
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
 
 async def confirm_login_password(session: TelegramSession, password: str) -> object:
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            await client.sign_in(password=password)
-            return await client.get_me()
+            await telegram_timeout(client.sign_in(password=password), 30)
+            return await telegram_timeout(client.get_me(), 20)
         finally:
             remember_client_session(session, client)
-            await client.disconnect()
+            await disconnect_client(client)
 
 
 async def logout_session_from_telegram(session: TelegramSession) -> None:
     async with session_lock(session.session_path):
         client = build_client(session)
-        await client.connect()
+        await telegram_timeout(client.connect(), 20)
         try:
-            if await client.is_user_authorized():
-                await client.log_out()
+            if await telegram_timeout(client.is_user_authorized(), 20):
+                await telegram_timeout(client.log_out(), 30)
         finally:
-            await client.disconnect()
+            await disconnect_client(client)

@@ -123,6 +123,21 @@ def test_create_interval_post_enforces_spam_limits(client, auth_user, db_session
     assert accepted.json()["interval_minutes"] == 20
 
 
+def test_create_post_rejects_more_than_fifteen_targets(client, auth_user, db_session) -> None:
+    auth_user(111)
+    session = make_session(db_session, owner_id=111)
+    chats = [make_chat(db_session, session, title=f"Group {index}") for index in range(16)]
+    db_session.commit()
+
+    response = client.post(
+        "/api/posts",
+        json=post_payload(str(session.id), [str(chat.id) for chat in chats]),
+    )
+
+    assert response.status_code == 422
+    assert "не больше 15" in response.text
+
+
 def test_create_custom_weekdays_post_requires_and_returns_days(
     client,
     auth_user,
@@ -331,7 +346,8 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     )
 
     assert response.status_code == 422
-    assert "telegram rejected phone" in response.text
+    assert "Не удалось отправить код Telegram" in response.text
+    assert "telegram rejected phone" not in response.text
 
 
 def test_start_login_enforces_code_request_cooldown(
@@ -356,10 +372,10 @@ def test_start_login_enforces_code_request_cooldown(
     )
 
     assert response.status_code == 429
-    assert "Повторно запросить SMS можно" in response.text
+    assert "Повторно запросить код можно" in response.text
 
 
-def test_start_login_cooldown_does_not_block_app_code(
+def test_start_login_cooldown_blocks_all_code_requests(
     client,
     auth_user,
     db_session,
@@ -370,24 +386,18 @@ def test_start_login_cooldown_does_not_block_app_code(
     existing.last_code_requested_at = datetime.now(UTC)
     db_session.commit()
 
-    async def fake_request_login_code(_session, *, force_sms=False):
-        assert force_sms is False
-        return SimpleNamespace(
-            phone_code_hash="app-hash",
-            delivery_type="SentCodeTypeApp",
-            next_delivery_type=None,
-            timeout=None,
-        )
+    async def unexpected_request_login_code(_session, *, force_sms=False):
+        raise AssertionError("Telegram should not be called while cooldown is active")
 
-    monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
+    monkeypatch.setattr(api_module, "request_login_code", unexpected_request_login_code)
 
     response = client.post(
         "/api/account/start-login",
         json={"phone": "+995000000000"},
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["delivery_type"] == "SentCodeTypeApp"
+    assert response.status_code == 429
+    assert "Повторно запросить код можно" in response.text
 
 
 def test_confirm_code_handles_password_needed_and_success(client, auth_user, db_session, monkeypatch) -> None:
@@ -459,7 +469,8 @@ def test_confirm_code_rejects_missing_foreign_and_telegram_errors(
         json={"session_id": str(session.id), "code": "00000"},
     )
     assert response.status_code == 422
-    assert "bad code" in response.text
+    assert "Не удалось подтвердить код Telegram" in response.text
+    assert "bad code" not in response.text
 
 
 def test_confirm_password_success_foreign_and_telegram_error(
@@ -489,7 +500,8 @@ def test_confirm_password_success_foreign_and_telegram_error(
         json={"session_id": str(session.id), "password": "bad"},
     )
     assert response.status_code == 422
-    assert "wrong password" in response.text
+    assert "Не удалось подтвердить пароль 2FA" in response.text
+    assert "wrong password" not in response.text
 
     async def invalid_telegram_password(_session, _password):
         raise PasswordHashInvalidError(request=None)
@@ -734,27 +746,17 @@ def test_sync_chats_rejects_foreign_session_and_telegram_runtime_error(
     monkeypatch.setattr(api_module, "list_dialogs_from_session", failing_dialogs)
     response = client.post(f"/api/sessions/{session.id}/sync-chats")
     assert response.status_code == 409
-    assert "needs login" in response.text
+    assert "Не удалось синхронизировать" in response.text
+    assert "needs login" not in response.text
 
 
 def test_create_chat_validates_owner_and_duplicate(client, auth_user, db_session) -> None:
     session = make_session(db_session, owner_id=111)
-    foreign_session = make_session(db_session, owner_id=222)
+    make_session(db_session, owner_id=222)
     db_session.commit()
     auth_user(111)
 
-    foreign = client.post(
-        "/api/chats",
-        json={
-            "session_id": str(foreign_session.id),
-            "telegram_chat_id": -1001,
-            "title": "Foreign",
-            "type": "supergroup",
-        },
-    )
-    assert foreign.status_code == 404
-
-    created = client.post(
+    response = client.post(
         "/api/chats",
         json={
             "session_id": str(session.id),
@@ -763,19 +765,8 @@ def test_create_chat_validates_owner_and_duplicate(client, auth_user, db_session
             "type": "supergroup",
         },
     )
-    assert created.status_code == 200, created.text
-    assert created.json()["title"] == "Manual group"
-
-    duplicate = client.post(
-        "/api/chats",
-        json={
-            "session_id": str(session.id),
-            "telegram_chat_id": -1001,
-            "title": "Manual group",
-            "type": "supergroup",
-        },
-    )
-    assert duplicate.status_code == 409
+    assert response.status_code == 410
+    assert "синхронизацию" in response.text
 
 
 def test_list_folders_returns_telegram_folder_chat_ids_without_local_sync_filter(
@@ -1384,7 +1375,7 @@ def test_admin_lists_users_with_search_and_pagination(client, auth_user, db_sess
     assert data["total"] == 1
     assert data["items"][0]["telegram_user_id"] == 111
     assert data["items"][0]["username"] == "alice_market"
-    assert data["items"][0]["phone"] == "+111"
+    assert data["items"][0]["phone"] == "+***"
     assert data["items"][0]["autopost_paused"] is True
     assert data["items"][0]["banned"] is False
     assert data["items"][0]["daily_send_limit"] == 7

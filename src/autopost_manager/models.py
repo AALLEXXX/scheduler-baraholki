@@ -80,6 +80,15 @@ class UserSettings(Base):
     )
 
 
+class RateLimitEvent(Base):
+    __tablename__ = "rate_limit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    scope: Mapped[str] = mapped_column(String(80), index=True)
+    key: Mapped[str] = mapped_column(String(240), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class TelegramSession(Base):
     __tablename__ = "telegram_sessions"
 
@@ -206,6 +215,8 @@ class PublishJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
-from autopost_manager.models import Post, PostStatus, PublishJob, ScheduleKind, UserSettings
+from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
 
 
 def as_aware(value: datetime) -> datetime:
@@ -70,22 +70,50 @@ def next_run_after(post: Post, now: datetime) -> datetime | None:
 
 def enqueue_due_posts() -> int:
     now = datetime.now(UTC)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     created = 0
     with SessionLocal() as db:
-        paused_owner_exists = exists().where(
+        blocked_owner_exists = exists().where(
             UserSettings.telegram_user_id == Post.created_by_telegram_id,
-            UserSettings.autopost_paused.is_(True),
+            (UserSettings.autopost_paused.is_(True)) | (UserSettings.banned.is_(True)),
         )
         posts = db.scalars(
             select(Post)
             .where(Post.status == PostStatus.scheduled)
             .where(Post.next_run_at.is_not(None))
             .where(Post.next_run_at <= now)
-            .where(~paused_owner_exists)
+            .where(~blocked_owner_exists)
+            .with_for_update(skip_locked=True, of=Post)
         ).unique()
 
         for post in posts:
+            if len({target.target_chat_id for target in post.targets}) > get_settings().max_targets_per_post:
+                post.status = PostStatus.paused
+                continue
+            owner_id = post.created_by_telegram_id
+            if owner_id is not None:
+                today_jobs = int(
+                    db.scalar(
+                        select(func.count())
+                        .select_from(PublishJob)
+                        .join(Post, PublishJob.post_id == Post.id)
+                        .where(Post.created_by_telegram_id == owner_id)
+                        .where(PublishJob.created_at >= day_start)
+                    )
+                    or 0
+                )
+                if today_jobs >= get_settings().max_jobs_per_user_per_day:
+                    post.next_run_at = now + timedelta(hours=1)
+                    continue
             for target in post.targets:
+                existing = db.scalars(
+                    select(PublishJob)
+                    .where(PublishJob.post_id == post.id)
+                    .where(PublishJob.target_chat_id == target.target_chat_id)
+                    .where(PublishJob.status.in_([JobStatus.pending, JobStatus.processing]))
+                ).first()
+                if existing:
+                    continue
                 db.add(
                     PublishJob(
                         post_id=post.id,

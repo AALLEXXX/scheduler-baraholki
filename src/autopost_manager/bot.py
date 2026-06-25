@@ -15,7 +15,7 @@ from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
 
 
-def admin_only(message: Message) -> bool:
+def has_telegram_user(message: Message) -> bool:
     return bool(message.from_user)
 
 
@@ -34,7 +34,7 @@ def panel_keyboard() -> InlineKeyboardMarkup:
 
 
 async def start(message: Message) -> None:
-    if not admin_only(message):
+    if not has_telegram_user(message):
         await message.answer("Access denied.")
         return
 
@@ -45,7 +45,7 @@ async def start(message: Message) -> None:
 
 
 async def status(message: Message) -> None:
-    if not admin_only(message):
+    if not has_telegram_user(message):
         await message.answer("Access denied.")
         return
     await message.answer("Сервис работает. Посты отправляются через подключенные аккаунты пользователей.")

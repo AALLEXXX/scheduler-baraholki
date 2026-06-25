@@ -154,9 +154,10 @@ def test_process_one_job_records_send_error(monkeypatch, db_session) -> None:
     assert processed is True
     with SessionLocal() as db:
         refreshed = db.get(PublishJob, job.id)
-        assert refreshed.status == JobStatus.failed
+        assert refreshed.status == JobStatus.pending
         assert refreshed.attempts == 1
         assert refreshed.last_error == "RuntimeError: telegram exploded"
+        assert refreshed.next_attempt_at is not None
 
 
 def test_process_one_job_returns_false_when_queue_is_empty() -> None:

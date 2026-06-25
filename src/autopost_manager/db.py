@@ -72,9 +72,17 @@ def ensure_runtime_columns() -> None:
         "ALTER TABLE posts ADD COLUMN IF NOT EXISTS ack_bot_chat_id BIGINT",
         "ALTER TABLE posts ADD COLUMN IF NOT EXISTS ack_bot_message_id BIGINT",
         "ALTER TABLE posts ADD COLUMN IF NOT EXISTS schedule_weekdays VARCHAR(40)",
+        "ALTER TABLE publish_jobs ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE publish_jobs ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMP WITH TIME ZONE",
+        "CREATE TABLE IF NOT EXISTS rate_limit_events (id UUID PRIMARY KEY, scope VARCHAR(80) NOT NULL, key VARCHAR(240) NOT NULL, created_at TIMESTAMP WITH TIME ZONE NOT NULL)",
         "CREATE INDEX IF NOT EXISTS ix_telegram_sessions_owner_telegram_id ON telegram_sessions (owner_telegram_id)",
         "CREATE INDEX IF NOT EXISTS ix_target_chats_owner_telegram_id ON target_chats (owner_telegram_id)",
         "CREATE INDEX IF NOT EXISTS ix_posts_source_media_group_id ON posts (source_media_group_id)",
+        "CREATE INDEX IF NOT EXISTS ix_publish_jobs_locked_until ON publish_jobs (locked_until)",
+        "CREATE INDEX IF NOT EXISTS ix_publish_jobs_next_attempt_at ON publish_jobs (next_attempt_at)",
+        "CREATE INDEX IF NOT EXISTS ix_rate_limit_events_scope ON rate_limit_events (scope)",
+        "CREATE INDEX IF NOT EXISTS ix_rate_limit_events_key ON rate_limit_events (key)",
+        "CREATE INDEX IF NOT EXISTS ix_rate_limit_events_created_at ON rate_limit_events (created_at)",
     ]
     with engine.begin() as connection:
         for statement in statements:
