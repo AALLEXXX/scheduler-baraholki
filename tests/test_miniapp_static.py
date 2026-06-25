@@ -46,7 +46,7 @@ def test_miniapp_login_only_asks_for_phone_number() -> None:
     assert 'name="api_hash"' not in html
     assert "API ID" not in html
     assert "API Hash" not in html
-    assert "Введите номер телефона" in html
+    assert "Enter your phone number" in html
     assert "api_id" not in js
     assert "api_hash" not in js
 
@@ -65,23 +65,32 @@ def test_miniapp_uses_telegram_drafts_instead_of_free_text_composer() -> None:
     css = read("styles.css")
 
     assert 'id="draft-picker"' in html
+    assert 'id="draft-help-button"' in html
+    assert 'id="draft-help-tooltip"' in html
     assert 'id="open-bot"' not in html
     assert 'id="refresh-drafts"' not in html
     assert 'id="sync-groups"' not in html
     assert "Открыть бота и создать пост" not in html
-    assert "появится здесь как черновик" in html
-    assert "Отправьте готовый пост прямо в чат" in html
-    assert "draft-instruction" in html
+    assert "post will appear here as a draft" in html
+    assert "Send the finished post to this bot" in html
+    assert "draft-instruction" not in html
+    assert "setDraftHelpVisible" in js
+    assert "#draft-help-button" in js
+    assert "#draft-help-tooltip" in js
     assert 'textarea name="body"' not in html
     assert "selectedDraftId" in js
+    assert "visibleDrafts[0]?.id" not in js
+    assert "toggleDraftSelection" in js
+    assert "state.selectedDraftId === draftId ? null : draftId" in js
     assert 'api(`posts/${draftId}/schedule`' in js
-    assert "Отправьте пост боту" in js
+    assert "validation.chooseDraft" in js
     assert "openTelegramBot" not in js
     assert "tg://resolve" not in js
     assert "#open-bot" not in js
     assert "#refresh-drafts" not in js
     assert "#sync-groups" not in js
-    assert ".draft-instruction" in css
+    assert ".info-button" in css
+    assert ".draft-help-popover" in css
 
 
 def test_miniapp_can_paginate_and_delete_posts() -> None:
@@ -106,13 +115,13 @@ def test_miniapp_can_paginate_and_delete_posts() -> None:
     assert "function deletionMessage" in js
     assert "source_messages_found" in js
     assert "telegram_delete_errors" in js
-    assert "не был сохранён message_id" in js
+    assert "notice.deleteMissingMessage" in js
     assert 'method: "DELETE"' in js
     assert "confirmDeletePost" in js
     assert ".danger-button" in css
 
 
-def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
+def test_miniapp_queue_has_details_editing_and_precise_pause_controls() -> None:
     html = read("index.html")
     js = read("app.js")
     css = read("styles.css")
@@ -128,20 +137,25 @@ def test_miniapp_queue_has_russian_details_editing_and_pause_controls() -> None:
         assert f'id="{element_id}"' in html
         assert f"#{element_id}" in js
 
-    assert "Расписание" in js
-    assert "Куда" in js
-    assert "Запланирован" in js
-    assert "На паузе" in js
-    assert "Редактировать" in js
-    assert "Пауза" in js
-    assert "Продолжить" in js
+    assert 't("form.when")' in js
+    assert 't("groups.title")' in js
+    assert "post-status-icon" in js
+    assert "post-icon-button" in js
+    assert 'aria-label="${t("post.action.edit")}"' in js
+    assert 'aria-label="${t("delete.button")}"' in js
+    assert "settings.pauseButton" in js
+    assert "settings.resumeButton" in js
+    assert "Pause sending" in js
     assert "togglePausePost" in js
     assert "openEditPost" in js
     assert 'method: "PATCH"' in js
     assert "/pause" in js
     assert "/resume" in js
-    assert "Старая дата уже прошла" in js
+    assert "edit.pastDate" in js
+    assert 'class="queue-heading"' in html
     assert ".post-meta" in css
+    assert ".post-icon-button" in css
+    assert ".post-status-icon" in css
     assert ".post-item.scheduled" in css
     assert ".modal-backdrop" in css
     assert ".modal-close" in css
@@ -163,6 +177,36 @@ def test_miniapp_auto_syncs_groups_and_can_pause_or_revoke_account() -> None:
     assert "autoSyncGroups" in js
     assert "groupsSyncedOnInit" in js
     assert "syncGroups({ silent: true })" in js
+
+
+def test_miniapp_defaults_to_english_and_can_switch_to_russian() -> None:
+    html = read("index.html")
+    js = read("app.js")
+    css = read("styles.css")
+
+    assert '<html lang="en">' in html
+    assert "<title>Baraholki</title>" in html
+    assert 'id="language-select"' in html
+    assert '<option value="en">English</option>' in html
+    assert '<option value="ru">Русский</option>' in html
+    assert 'class="settings-section-label"' in html
+    assert 'class="settings-control"' in html
+    assert 'data-i18n="settings.languageTitle"' in html
+    assert 'data-i18n-placeholder="groups.search"' in html
+    assert 'data-i18n-aria-label="action.refresh"' in html
+    assert 'const languageStorageKey = "autopost-manager-language";' in js
+    assert 'const supportedLanguages = ["en", "ru"];' in js
+    assert 'language: localStorage.getItem(languageStorageKey) || "en"' in js
+    assert "function applyTranslations" in js
+    assert "function setLanguage" in js
+    assert 'document.querySelector("#language-select").addEventListener("change"' in js
+    assert '"settings.pauseTitle": "Autoposting"' in js
+    assert '"settings.pauseTitle": "Автопостинг"' in js
+    assert '"settings.pauseButton": "Pause sending"' in js
+    assert '"settings.pauseButton": "Остановить отправки"' in js
+    assert ".settings-section-label" in css
+    assert ".settings-control" in css
+    assert ".compact-select" in css
 
 
 def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
@@ -203,8 +247,8 @@ def test_miniapp_warns_when_selecting_more_than_fifteen_chats() -> None:
     assert "showLargeChatSelectionWarning" in js
     assert "warnIfLargeChatSelection(previousCount, state.selectedChatIds.size)" in js
     assert "warnIfLargeChatSelection(previousCount, state.editSelectedChatIds.size)" in js
-    assert "может быть опасной" in js
-    assert "на свой страх и риск" in js
+    assert "spam.largeSelection" in js
+    assert "Continue at your own risk" in js
 
 
 def test_miniapp_has_audit_tab_with_top_pagination() -> None:
@@ -219,6 +263,10 @@ def test_miniapp_has_audit_tab_with_top_pagination() -> None:
         "audit-next",
         "audit-page",
         "audit-list",
+        "audit-message-modal",
+        "audit-message-close",
+        "audit-message-text",
+        "audit-message-link",
     ]:
         assert f'id="{element_id}"' in html
         assert f"#{element_id}" in js
@@ -230,11 +278,19 @@ def test_miniapp_has_audit_tab_with_top_pagination() -> None:
     assert "function renderAudit" in js
     assert "function renderAuditPagination" in js
     assert "function auditStatusLabel" in js
-    assert "Успешно" in js
-    assert "Ошибка" in js
+    assert "audit.status.done" in js
+    assert "audit.status.failed" in js
+    assert "audit.viewMessage" in js
+    assert "function loadAuditMessage" in js
+    assert "function showAuditMessage" in js
+    assert 'api(`audit/${item.id}/message`)' in js
+    assert "item.message_link" in js
+    assert "audit.messageId" not in js
     assert ".tab-bar" in css
     assert ".audit-list" in css
     assert ".audit-pagination" in css
+    assert ".audit-actions" in css
+    assert ".audit-message-text" in css
 
 
 def test_miniapp_datetime_inputs_are_constrained_on_mobile() -> None:
@@ -252,9 +308,9 @@ def test_miniapp_spam_guard_is_visible_in_ui_and_payload() -> None:
     js = read("app.js")
 
     assert 'name="interval_minutes" type="number" min="20"' in html
-    assert "Минимальный интервал повтора" in js
-    assert "За частую отправку сообщений" in js
-    assert "Я понимаю" in js
+    assert "spam.minInterval" in js
+    assert "spam.riskMessage" in js
+    assert "spam.understand" in js
     assert "confirmSpamRiskIfNeeded" in js
     assert "spam_risk_acknowledged" in js
 
@@ -283,7 +339,7 @@ def test_miniapp_preserves_folder_picker_and_falls_back_when_folder_api_fails() 
 
     assert 'api("folders").catch(() => state.folders)' in js
     assert "function folderItems" in js
-    assert '{ id: "all", title: "Все"' in js
+    assert 'title: t("folder.all")' in js
     assert "renderFolderPicker()" in js
     assert "renderEditFolderPicker()" in js
 
@@ -317,8 +373,8 @@ def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
     assert 'api("admin/stats")' in js
     assert 'api(`admin/users/${telegramUserId}`' in js
     assert "daily_send_limit" in js
-    assert "Забанить" in js
-    assert "Остановить" in js
+    assert "admin.ban" in js
+    assert "admin.pause" in js
     assert ".admin-list" in css
     assert ".admin-stats-grid" in css
     assert ".admin-stat-hero" in css

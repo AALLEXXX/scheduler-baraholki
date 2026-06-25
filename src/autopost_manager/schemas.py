@@ -198,6 +198,7 @@ class AuditItemOut(BaseModel):
     status: JobStatus
     attempts: int
     telegram_message_id: int | None
+    message_link: str | None = None
     last_error: str | None
 
 
@@ -206,6 +207,14 @@ class AuditPageOut(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class AuditMessageOut(BaseModel):
+    id: uuid.UUID
+    target_chat_title: str
+    telegram_message_id: int
+    message_text: str
+    message_link: str | None = None
 
 
 class AdminUserOut(BaseModel):

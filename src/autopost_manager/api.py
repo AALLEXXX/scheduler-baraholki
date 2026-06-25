@@ -54,6 +54,7 @@ from autopost_manager.schemas import (
     AdminUserUpdate,
     AppConfigOut,
     AuditItemOut,
+    AuditMessageOut,
     AuditPageOut,
     DeletePostOut,
     DialogFolderOut,
@@ -73,6 +74,7 @@ from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
     delete_messages_from_session,
+    get_message_from_session,
     list_dialog_folders_from_session,
     list_dialogs_from_session,
     logout_session_from_telegram,
@@ -260,6 +262,18 @@ def active_account(
         .where(TelegramSession.status == SessionStatus.active)
         .order_by(TelegramSession.updated_at.desc())
     ).first()
+
+
+def telegram_message_link(chat: TargetChat, message_id: int | None) -> str | None:
+    if not message_id:
+        return None
+    if chat.username:
+        return f"https://t.me/{chat.username}/{message_id}"
+    chat_id = int(chat.telegram_chat_id)
+    chat_id_text = str(abs(chat_id))
+    if chat_id_text.startswith("100") and len(chat_id_text) > 3:
+        return f"https://t.me/c/{chat_id_text[3:]}/{message_id}"
+    return None
 
 
 def user_settings(
@@ -1189,6 +1203,7 @@ def list_audit(
                 status=job.status,
                 attempts=job.attempts,
                 telegram_message_id=job.telegram_message_id,
+                message_link=telegram_message_link(chat, job.telegram_message_id),
                 last_error=job.last_error,
             )
             for job, post, chat in rows
@@ -1196,6 +1211,53 @@ def list_audit(
         page=page,
         page_size=page_size,
         total=total or 0,
+    )
+
+
+@app.get("/api/audit/{job_id}/message", response_model=AuditMessageOut)
+async def get_audit_message(
+    job_id: uuid.UUID,
+    telegram_user_id: int = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> AuditMessageOut:
+    row = db.execute(
+        select(PublishJob, Post, TargetChat)
+        .join(Post, PublishJob.post_id == Post.id)
+        .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
+        .where(PublishJob.id == job_id)
+        .where(Post.created_by_telegram_id == telegram_user_id)
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Audit item not found")
+
+    job, _post, chat = row
+    if not job.telegram_message_id:
+        raise HTTPException(status_code=404, detail="Telegram message id is not available")
+
+    session = job.session
+    if not session or session.owner_telegram_id != telegram_user_id or session.status != SessionStatus.active:
+        session = active_account(telegram_user_id=telegram_user_id, db=db)
+    if not session:
+        raise HTTPException(status_code=409, detail="Connect Telegram account to view this message")
+
+    try:
+        message = await get_message_from_session(
+            session=session,
+            peer=chat.telegram_chat_id,
+            message_id=job.telegram_message_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found in Telegram chat")
+
+    return AuditMessageOut(
+        id=job.id,
+        target_chat_title=chat.title,
+        telegram_message_id=job.telegram_message_id,
+        message_text=message.text,
+        message_link=telegram_message_link(chat, job.telegram_message_id),
     )
 
 

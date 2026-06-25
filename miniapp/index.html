@@ -1,57 +1,57 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Барахолки</title>
-    <link rel="stylesheet" href="styles.css?v=20260626-4" />
+    <title>Baraholki</title>
+    <link rel="stylesheet" href="styles.css?v=20260626-5" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <main class="app-shell">
       <header class="app-header">
         <div>
-          <p class="eyebrow">Автопостинг</p>
-          <h1>Барахолки</h1>
+          <p class="eyebrow" data-i18n="app.eyebrow">Autoposting</p>
+          <h1 data-i18n="app.title">Baraholki</h1>
         </div>
         <div class="header-actions">
           <button id="admin-tab-button" class="admin-shortcut" type="button" data-tab="admin" hidden>
-            Админка
+            Admin
           </button>
-          <button id="refresh" class="icon-button" type="button" aria-label="Обновить">↻</button>
+          <button id="refresh" class="icon-button" type="button" aria-label="Refresh" data-i18n-aria-label="action.refresh">↻</button>
         </div>
       </header>
 
       <div id="notice" class="notice" hidden></div>
 
-      <nav class="tab-bar" aria-label="Разделы">
-        <button class="tab-button selected" type="button" data-tab="posts">Посты</button>
-        <button class="tab-button" type="button" data-tab="audit">Аудит</button>
-        <button class="tab-button" type="button" data-tab="settings">Настройки</button>
+      <nav class="tab-bar" aria-label="Sections" data-i18n-aria-label="nav.sections">
+        <button class="tab-button selected" type="button" data-tab="posts" data-i18n="nav.posts">Posts</button>
+        <button class="tab-button" type="button" data-tab="audit" data-i18n="nav.audit">Audit</button>
+        <button class="tab-button" type="button" data-tab="settings" data-i18n="nav.settings">Settings</button>
       </nav>
 
       <section class="status-panel" data-tab-panel="posts">
         <div>
           <span id="account-state" class="status-dot"></span>
-          <p id="account-title">Проверяем аккаунт</p>
+          <p id="account-title">Checking account</p>
           <strong id="account-subtitle">...</strong>
         </div>
         <div class="status-actions">
-          <button id="account-pause" class="secondary-button" type="button" hidden>Пауза</button>
+          <button id="account-pause" class="secondary-button" type="button" hidden>Pause autoposting</button>
         </div>
       </section>
 
       <section id="connect-panel" class="panel accent-panel">
         <div class="panel-heading">
-          <h2>Подключить аккаунт</h2>
-          <p>Введите номер телефона. Код придёт в Telegram.</p>
+          <h2 data-i18n="connect.title">Connect account</h2>
+          <p data-i18n="connect.hint">Enter your phone number. Telegram will send the code.</p>
         </div>
 
         <form id="login-form" class="stack login-flow-form">
           <div class="phone-row">
             <label>
-              Страна
-              <select name="country_code" aria-label="Код страны">
+              <span data-i18n="connect.country">Country</span>
+              <select name="country_code" aria-label="Country code" data-i18n-aria-label="connect.countryCode">
                 <option value="+995">🇬🇪 +995</option>
                 <option value="+7">🇷🇺 +7</option>
                 <option value="+7">🇰🇿 +7</option>
@@ -63,176 +63,213 @@
               </select>
             </label>
             <label>
-              Телефон
+              <span data-i18n="connect.phone">Phone</span>
               <input name="phone_local" autocomplete="tel" inputmode="tel" placeholder="599..." required />
             </label>
           </div>
-          <button id="send-code" type="submit">Получить код</button>
+          <button id="send-code" type="submit" data-i18n="connect.getCode">Get code</button>
         </form>
 
         <form id="code-form" class="stack login-flow-form" hidden>
           <label>
-            Код из Telegram
+            <span data-i18n="connect.telegramCode">Telegram code</span>
             <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
           </label>
           <div class="login-action-row">
-            <button type="submit">Подключить</button>
-            <button id="resend-sms-code" class="secondary-button" type="button">Отправить SMS</button>
+            <button type="submit" data-i18n="connect.connect">Connect</button>
+            <button id="resend-sms-code" class="secondary-button" type="button" data-i18n="connect.sendSms">Send SMS</button>
           </div>
         </form>
 
         <form id="password-form" class="stack login-flow-form" hidden>
           <label>
-            Пароль 2FA
+            <span data-i18n="connect.password">2FA password</span>
             <input name="password" type="password" autocomplete="current-password" required />
           </label>
-          <button type="submit">Завершить</button>
+          <button type="submit" data-i18n="connect.finish">Finish</button>
         </form>
       </section>
 
       <section class="panel composer-panel" data-tab-panel="posts">
         <div class="panel-heading">
-          <h2>Новый пост</h2>
-          <p id="compose-hint">Сначала подключите аккаунт.</p>
+          <div class="composer-title-row">
+            <h2 data-i18n="composer.title">New post</h2>
+            <button
+              id="draft-help-button"
+              class="info-button"
+              type="button"
+              aria-label="How to add a draft"
+              data-i18n-aria-label="draftHelp.button"
+              aria-expanded="false"
+              aria-describedby="draft-help-tooltip"
+            >
+              i
+            </button>
+          </div>
+          <p id="compose-hint">Connect an account first.</p>
+        </div>
+
+        <div id="draft-help-tooltip" class="draft-help-popover" role="tooltip" hidden>
+          <strong data-i18n="draftHelp.title">How to add a draft</strong>
+          <p data-i18n="draftHelp.body">
+            Send the finished post to this bot in Telegram: text, photo, video, or album.
+            Then press refresh at the top, and the post will appear here as a draft.
+          </p>
         </div>
 
         <form id="post-form" class="stack">
-          <div class="draft-instruction">
-            <strong>Как добавить черновик</strong>
-            <p>
-              Отправьте готовый пост прямо в чат с этим ботом в Telegram: текст, фото,
-              видео или альбом. После этого нажмите кнопку обновления сверху, и пост
-              появится здесь как черновик.
-            </p>
-          </div>
-
           <div>
             <div class="section-row">
-              <span>Черновик</span>
-              <small id="drafts-count">0 постов</small>
+              <span data-i18n="drafts.title">Draft</span>
+              <small id="drafts-count">0 posts</small>
             </div>
             <div id="draft-picker" class="draft-list"></div>
             <div id="draft-pagination" class="pagination" hidden>
-              <button id="drafts-prev" type="button">Назад</button>
+              <button id="drafts-prev" type="button" data-i18n="pagination.prev">Back</button>
               <span id="drafts-page">1 / 1</span>
-              <button id="drafts-next" type="button">Дальше</button>
+              <button id="drafts-next" type="button" data-i18n="pagination.next">Next</button>
             </div>
           </div>
 
           <div class="form-grid">
             <label>
-              Когда
+              <span data-i18n="form.when">When</span>
               <input name="next_run_at" type="datetime-local" required />
             </label>
             <label>
-              Повтор
+              <span data-i18n="form.repeat">Repeat</span>
               <select name="schedule_kind">
-                <option value="once">Один раз</option>
-                <option value="interval">Каждые N минут</option>
-                <option value="daily">Каждый день</option>
-                <option value="weekdays">Только будни</option>
-                <option value="weekends">Только выходные</option>
-                <option value="every_other_day">Через день</option>
-                <option value="custom_weekdays">Выбрать дни недели</option>
+                <option value="once" data-i18n="schedule.once">Once</option>
+                <option value="interval" data-i18n="schedule.interval">Every N minutes</option>
+                <option value="daily" data-i18n="schedule.daily">Every day</option>
+                <option value="weekdays" data-i18n="schedule.weekdays">Weekdays only</option>
+                <option value="weekends" data-i18n="schedule.weekends">Weekends only</option>
+                <option value="every_other_day" data-i18n="schedule.everyOtherDay">Every other day</option>
+                <option value="custom_weekdays" data-i18n="schedule.customWeekdays">Choose weekdays</option>
               </select>
             </label>
           </div>
 
           <label id="interval-row" hidden>
-            Интервал, минут
+            <span data-i18n="form.intervalMinutes">Interval, minutes</span>
             <input name="interval_minutes" type="number" min="20" value="60" />
           </label>
 
           <div id="weekday-row" class="weekday-row" hidden>
-            <span>Дни недели</span>
+            <span data-i18n="form.weekdays">Weekdays</span>
             <div class="weekday-list">
-              <label><input name="schedule_weekdays" type="checkbox" value="0" /> Пн</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="1" /> Вт</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="2" /> Ср</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="3" /> Чт</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="4" /> Пт</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="5" /> Сб</label>
-              <label><input name="schedule_weekdays" type="checkbox" value="6" /> Вс</label>
+              <label><input name="schedule_weekdays" type="checkbox" value="0" /> <span data-i18n="weekday.mon">Mon</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="1" /> <span data-i18n="weekday.tue">Tue</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="2" /> <span data-i18n="weekday.wed">Wed</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="3" /> <span data-i18n="weekday.thu">Thu</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="4" /> <span data-i18n="weekday.fri">Fri</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="5" /> <span data-i18n="weekday.sat">Sat</span></label>
+              <label><input name="schedule_weekdays" type="checkbox" value="6" /> <span data-i18n="weekday.sun">Sun</span></label>
             </div>
           </div>
 
           <div>
             <div class="section-row">
-              <span>Куда отправлять</span>
-              <small id="groups-count">0 групп</small>
+              <span data-i18n="groups.title">Send to</span>
+              <small id="groups-count">0 groups</small>
             </div>
             <input
               id="group-search"
               class="search-input"
               type="search"
-              placeholder="Найти группу"
+              placeholder="Find group"
+              data-i18n-placeholder="groups.search"
               autocomplete="off"
             />
             <div id="folder-picker" class="folder-list"></div>
             <div id="group-picker" class="chip-grid"></div>
             <div id="group-pagination" class="pagination" hidden>
-              <button id="groups-prev" type="button">Назад</button>
+              <button id="groups-prev" type="button" data-i18n="pagination.prev">Back</button>
               <span id="groups-page">1 / 1</span>
-              <button id="groups-next" type="button">Дальше</button>
+              <button id="groups-next" type="button" data-i18n="pagination.next">Next</button>
             </div>
           </div>
 
-          <button id="save-post" type="submit">Запланировать</button>
+          <button id="save-post" type="submit" data-i18n="composer.schedule">Schedule</button>
         </form>
       </section>
 
       <section class="panel" data-tab-panel="posts">
         <div class="panel-heading compact">
-          <h2>Очередь</h2>
-          <p id="posts-count">0 постов</p>
+          <div class="queue-heading">
+            <h2 data-i18n="queue.title">Queue</h2>
+            <p id="posts-count">0 posts</p>
+          </div>
         </div>
         <div id="posts" class="post-list"></div>
         <div id="posts-pagination" class="pagination" hidden>
-          <button id="posts-prev" type="button">Назад</button>
+          <button id="posts-prev" type="button" data-i18n="pagination.prev">Back</button>
           <span id="queue-page">1 / 1</span>
-          <button id="posts-next" type="button">Дальше</button>
+          <button id="posts-next" type="button" data-i18n="pagination.next">Next</button>
         </div>
       </section>
 
       <section class="panel" data-tab-panel="audit" hidden>
         <div class="panel-heading compact">
           <div>
-            <h2>Аудит действий</h2>
-            <p>История отправок по группам и результатам.</p>
+            <h2 data-i18n="audit.title">Audit log</h2>
+            <p data-i18n="audit.hint">Delivery history by group and result.</p>
           </div>
-          <p id="audit-count">0 записей</p>
+          <p id="audit-count">0 records</p>
         </div>
         <div id="audit-pagination" class="pagination audit-pagination" hidden>
-          <button id="audit-prev" type="button">Назад</button>
+          <button id="audit-prev" type="button" data-i18n="pagination.prev">Back</button>
           <span id="audit-page">1 / 1</span>
-          <button id="audit-next" type="button">Дальше</button>
+          <button id="audit-next" type="button" data-i18n="pagination.next">Next</button>
         </div>
         <div id="audit-list" class="audit-list"></div>
       </section>
 
-      <section class="panel" data-tab-panel="settings" hidden>
+      <section class="panel settings-panel" data-tab-panel="settings" hidden>
         <div class="panel-heading compact">
           <div>
-            <h2>Настройки</h2>
-            <p>Управление подключением и безопасными действиями.</p>
+            <h2 data-i18n="settings.title">Settings</h2>
+            <p data-i18n="settings.hint">Connection and account controls.</p>
           </div>
         </div>
 
         <div class="settings-list">
+          <div class="settings-section-label" data-i18n="settings.general">General</div>
           <div class="settings-row">
-            <div>
-              <strong>Глобальная пауза</strong>
-              <p id="global-pause-text">Останавливает все отправки, не удаляя Telegram-сессию.</p>
+            <span class="settings-icon" aria-hidden="true">A</span>
+            <div class="settings-copy">
+              <strong data-i18n="settings.languageTitle">Language</strong>
+              <p data-i18n="settings.languageHint">Choose the Mini App interface language.</p>
             </div>
-            <button id="settings-pause" class="secondary-button compact-button" type="button">Пауза</button>
+            <div class="settings-control">
+              <select id="language-select" class="compact-select" aria-label="Language" data-i18n-aria-label="settings.languageTitle">
+                <option value="en">English</option>
+                <option value="ru">Русский</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-section-label" data-i18n="settings.account">Account</div>
+          <div class="settings-row">
+            <span class="settings-icon" aria-hidden="true">Ⅱ</span>
+            <div class="settings-copy">
+              <strong data-i18n="settings.pauseTitle">Autoposting</strong>
+              <p id="global-pause-text">Stops all scheduled sends without deleting the Telegram session.</p>
+            </div>
+            <div class="settings-control">
+              <button id="settings-pause" class="secondary-button compact-button" type="button">Pause sending</button>
+            </div>
           </div>
 
           <div class="settings-row danger-zone">
-            <div>
-              <strong>Отключить Telegram-сессию</strong>
-              <p>Удаляет доступ сервиса к аккаунту. После этого Telegram может снова запросить код.</p>
+            <span class="settings-icon danger-icon" aria-hidden="true">!</span>
+            <div class="settings-copy">
+              <strong data-i18n="settings.revokeTitle">Telegram session</strong>
+              <p data-i18n="settings.revokeHint">Removes service access to the account. Telegram may ask for a code again.</p>
             </div>
-            <button id="revoke-session" class="danger-button compact-button" type="button">Отключить</button>
+            <div class="settings-control">
+              <button id="revoke-session" class="danger-button compact-button" type="button" data-i18n="settings.revokeButton">Disconnect</button>
+            </div>
           </div>
         </div>
       </section>
@@ -240,14 +277,14 @@
       <section class="panel" data-tab-panel="admin" hidden>
         <div class="panel-heading compact">
           <div>
-            <h2>Админка</h2>
-            <p>Пользователи, ограничения и общая статистика отправок.</p>
+            <h2 data-i18n="admin.title">Admin</h2>
+            <p data-i18n="admin.hint">Users, limits, and global delivery statistics.</p>
           </div>
         </div>
 
         <div id="admin-tabs" class="admin-tabs">
-          <button class="admin-tab-button selected" type="button" data-admin-tab="users">Пользователи</button>
-          <button class="admin-tab-button" type="button" data-admin-tab="stats">Статистика</button>
+          <button class="admin-tab-button selected" type="button" data-admin-tab="users" data-i18n="admin.users">Users</button>
+          <button class="admin-tab-button" type="button" data-admin-tab="stats" data-i18n="admin.stats">Stats</button>
         </div>
 
         <section id="admin-users" data-admin-panel="users">
@@ -255,14 +292,15 @@
             id="admin-user-search"
             class="search-input"
             type="search"
-            placeholder="Поиск по username, телефону или ID"
+            placeholder="Search username, phone, or ID"
+            data-i18n-placeholder="admin.search"
             autocomplete="off"
           />
           <div id="admin-user-list" class="admin-list"></div>
           <div id="admin-users-pagination" class="pagination" hidden>
-            <button id="admin-users-prev" type="button">Назад</button>
+            <button id="admin-users-prev" type="button" data-i18n="pagination.prev">Back</button>
             <span id="admin-users-page">1 / 1</span>
-            <button id="admin-users-next" type="button">Дальше</button>
+            <button id="admin-users-next" type="button" data-i18n="pagination.next">Next</button>
           </div>
         </section>
 
@@ -273,11 +311,11 @@
 
       <div id="edit-modal" class="modal-backdrop" hidden>
         <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="edit-title">
-          <button id="edit-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+          <button id="edit-close" class="modal-close" type="button" aria-label="Close" data-i18n-aria-label="action.close">×</button>
           <div class="panel-heading compact">
             <div>
-              <p class="eyebrow">Редактирование</p>
-              <h2 id="edit-title">Запланированный пост</h2>
+              <p class="eyebrow" data-i18n="edit.eyebrow">Editing</p>
+              <h2 id="edit-title" data-i18n="edit.title">Scheduled post</h2>
             </div>
           </div>
 
@@ -286,67 +324,83 @@
 
             <div class="form-grid">
               <label>
-                Когда
+                <span data-i18n="form.when">When</span>
                 <input name="next_run_at" type="datetime-local" required />
               </label>
               <label>
-                Повтор
+                <span data-i18n="form.repeat">Repeat</span>
                 <select name="schedule_kind">
-                  <option value="once">Один раз</option>
-                  <option value="interval">Каждые N минут</option>
-                  <option value="daily">Каждый день</option>
-                  <option value="weekdays">Только будни</option>
-                  <option value="weekends">Только выходные</option>
-                  <option value="every_other_day">Через день</option>
-                  <option value="custom_weekdays">Выбрать дни недели</option>
+                  <option value="once" data-i18n="schedule.once">Once</option>
+                  <option value="interval" data-i18n="schedule.interval">Every N minutes</option>
+                  <option value="daily" data-i18n="schedule.daily">Every day</option>
+                  <option value="weekdays" data-i18n="schedule.weekdays">Weekdays only</option>
+                  <option value="weekends" data-i18n="schedule.weekends">Weekends only</option>
+                  <option value="every_other_day" data-i18n="schedule.everyOtherDay">Every other day</option>
+                  <option value="custom_weekdays" data-i18n="schedule.customWeekdays">Choose weekdays</option>
                 </select>
               </label>
             </div>
 
             <label id="edit-interval-row" hidden>
-              Интервал, минут
+              <span data-i18n="form.intervalMinutes">Interval, minutes</span>
               <input name="interval_minutes" type="number" min="20" value="60" />
             </label>
 
             <div id="edit-weekday-row" class="weekday-row" hidden>
-              <span>Дни недели</span>
+              <span data-i18n="form.weekdays">Weekdays</span>
               <div class="weekday-list">
-                <label><input name="schedule_weekdays" type="checkbox" value="0" /> Пн</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="1" /> Вт</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="2" /> Ср</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="3" /> Чт</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="4" /> Пт</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="5" /> Сб</label>
-                <label><input name="schedule_weekdays" type="checkbox" value="6" /> Вс</label>
+                <label><input name="schedule_weekdays" type="checkbox" value="0" /> <span data-i18n="weekday.mon">Mon</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="1" /> <span data-i18n="weekday.tue">Tue</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="2" /> <span data-i18n="weekday.wed">Wed</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="3" /> <span data-i18n="weekday.thu">Thu</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="4" /> <span data-i18n="weekday.fri">Fri</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="5" /> <span data-i18n="weekday.sat">Sat</span></label>
+                <label><input name="schedule_weekdays" type="checkbox" value="6" /> <span data-i18n="weekday.sun">Sun</span></label>
               </div>
             </div>
 
             <div>
               <div class="section-row">
-                <span>Куда отправлять</span>
-                <small id="edit-groups-count">0 групп</small>
+                <span data-i18n="groups.title">Send to</span>
+                <small id="edit-groups-count">0 groups</small>
               </div>
               <input
                 id="edit-group-search"
                 class="search-input"
                 type="search"
-                placeholder="Найти группу"
+                placeholder="Find group"
+                data-i18n-placeholder="groups.search"
                 autocomplete="off"
               />
               <div id="edit-folder-picker" class="folder-list"></div>
               <div id="edit-group-picker" class="chip-grid"></div>
               <div id="edit-group-pagination" class="pagination" hidden>
-                <button id="edit-groups-prev" type="button">Назад</button>
+                <button id="edit-groups-prev" type="button" data-i18n="pagination.prev">Back</button>
                 <span id="edit-groups-page">1 / 1</span>
-                <button id="edit-groups-next" type="button">Дальше</button>
+                <button id="edit-groups-next" type="button" data-i18n="pagination.next">Next</button>
               </div>
             </div>
 
-            <button id="edit-save" type="submit">Сохранить изменения</button>
+            <button id="edit-save" type="submit" data-i18n="edit.save">Save changes</button>
           </form>
         </section>
       </div>
+
+      <div id="audit-message-modal" class="modal-backdrop" hidden>
+        <section class="modal-card audit-message-card" role="dialog" aria-modal="true" aria-labelledby="audit-message-title">
+          <button id="audit-message-close" class="modal-close" type="button" aria-label="Close" data-i18n-aria-label="action.close">×</button>
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="audit.messageEyebrow">Delivered message</p>
+              <h2 id="audit-message-title" data-i18n="audit.messageTitle">Message in chat</h2>
+            </div>
+          </div>
+          <p id="audit-message-chat" class="audit-message-chat"></p>
+          <pre id="audit-message-text" class="audit-message-text"></pre>
+          <a id="audit-message-link" class="secondary-button compact-button audit-message-link" href="#" target="_blank" rel="noreferrer" data-i18n="audit.openInTelegram" hidden>Open in Telegram</a>
+        </section>
+      </div>
     </main>
-    <script src="app.js?v=20260626-4"></script>
+    <script src="app.js?v=20260626-5"></script>
   </body>
 </html>

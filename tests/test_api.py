@@ -1262,7 +1262,7 @@ def test_audit_lists_owner_jobs_with_post_and_target_details(
     db_session,
 ) -> None:
     session = make_session(db_session, owner_id=111)
-    chat = make_chat(db_session, session, title="Main Group")
+    chat = make_chat(db_session, session, title="Main Group", telegram_chat_id=-1009876543210)
     post = make_post(db_session, owner_id=111, session=session, chats=[chat], body="Audit body")
     done_job = make_job(db_session, post, chat, session=session, status=JobStatus.done)
     done_job.telegram_message_id = 123
@@ -1289,7 +1289,43 @@ def test_audit_lists_owner_jobs_with_post_and_target_details(
     assert data["items"][0]["post_preview"] == "Audit body"
     assert data["items"][0]["media_count"] == 0
     assert data["items"][0]["target_chat_title"] == "Main Group"
+    if data["items"][0]["telegram_message_id"] == 123:
+        assert data["items"][0]["message_link"] == "https://t.me/c/9876543210/123"
     assert data["items"][0]["status"] in {done_job.status.value, failed_job.status.value}
+
+
+def test_audit_message_endpoint_fetches_exact_delivered_message(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session, title="Main Group", telegram_chat_id=-1009876543210)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat], body="Audit body")
+    job = make_job(db_session, post, chat, session=session, status=JobStatus.done)
+    job.telegram_message_id = 34
+    db_session.commit()
+
+    async def fake_get_message_from_session(*, session, peer, message_id):
+        assert session.owner_telegram_id == 111
+        assert peer == -1009876543210
+        assert message_id == 34
+        return SimpleNamespace(text="Exact delivered message", has_media=False, date=None)
+
+    monkeypatch.setattr(api_module, "get_message_from_session", fake_get_message_from_session)
+    auth_user(111)
+
+    response = client.get(f"/api/audit/{job.id}/message")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "id": str(job.id),
+        "target_chat_title": "Main Group",
+        "telegram_message_id": 34,
+        "message_text": "Exact delivered message",
+        "message_link": "https://t.me/c/9876543210/34",
+    }
 
 
 def test_audit_requires_active_account(client, auth_user, db_session) -> None:

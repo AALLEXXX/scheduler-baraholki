@@ -30,6 +30,13 @@ class LoginCodeRequest:
     timeout: int | None = None
 
 
+@dataclass(frozen=True)
+class TelegramMessageSnapshot:
+    text: str
+    has_media: bool
+    date: datetime | None = None
+
+
 def _lock_for(session_path: str) -> asyncio.Lock:
     if session_path not in _locks:
         _locks[session_path] = asyncio.Lock()
@@ -386,6 +393,32 @@ async def delete_messages_from_session(
             remember_client_session(session, client)
             await client.disconnect()
     return len(ids_to_delete)
+
+
+async def get_message_from_session(
+    session: TelegramSession,
+    peer: int,
+    message_id: int,
+) -> TelegramMessageSnapshot | None:
+    async with session_lock(session.session_path):
+        client = build_client(session)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telegram session needs login")
+            message = await client.get_messages(peer, ids=message_id)
+            if not message:
+                return None
+            return TelegramMessageSnapshot(
+                text=normalize_plain_text(
+                    getattr(message, "raw_text", None) or getattr(message, "message", None)
+                ),
+                has_media=bool(getattr(message, "media", None)),
+                date=getattr(message, "date", None),
+            )
+        finally:
+            remember_client_session(session, client)
+            await client.disconnect()
 
 
 def normalize_plain_text(value: str | None) -> str:
