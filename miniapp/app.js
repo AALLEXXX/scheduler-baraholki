@@ -1697,7 +1697,10 @@ function openEditPost(post, options = {}) {
   document.querySelector("#edit-preview").textContent = preview.length > 180 ? `${preview.slice(0, 180)}...` : preview;
   document.querySelector("#edit-group-search").value = "";
   updateScheduleControls(form, "edit-");
-  document.querySelector("#edit-modal").hidden = false;
+  const editPage = document.querySelector("#edit-modal");
+  editPage.hidden = false;
+  editPage.scrollTo({ top: 0, left: 0 });
+  document.body.classList.add("editing-open");
   renderEditFolderPicker();
   renderEditGroupPicker();
 
@@ -1709,6 +1712,7 @@ function openEditPost(post, options = {}) {
 function closeEditPost() {
   state.editingPostId = null;
   document.querySelector("#edit-modal").hidden = true;
+  document.body.classList.remove("editing-open");
 }
 
 function stripHtml(value) {
@@ -2073,12 +2077,6 @@ document.querySelector("#admin-users-next").addEventListener("click", () => {
 });
 
 document.querySelector("#edit-close").addEventListener("click", closeEditPost);
-
-document.querySelector("#edit-modal").addEventListener("click", (event) => {
-  if (event.target.id === "edit-modal") {
-    closeEditPost();
-  }
-});
 
 document.querySelector("#audit-message-close").addEventListener("click", closeAuditMessage);
 

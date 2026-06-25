@@ -158,9 +158,12 @@ def test_miniapp_queue_has_details_editing_and_precise_pause_controls() -> None:
     assert ".post-status-icon" in css
     assert ".post-title-row,\n  .audit-item-head" not in css
     assert ".post-item.scheduled" in css
-    assert ".modal-backdrop" in css
-    assert ".modal-close" in css
-    assert 'id="edit-close" class="modal-close"' in html
+    assert ".edit-page" in css
+    assert ".edit-page-shell" in css
+    assert ".edit-save-bar" in css
+    assert ".back-button" in css
+    assert 'id="edit-close" class="back-button secondary-button"' in html
+    assert 'document.body.classList.add("editing-open")' in js
 
 
 def test_miniapp_auto_syncs_groups_and_can_pause_or_revoke_account() -> None:
@@ -241,6 +244,8 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "[hidden]" in css
     assert ".group-chip span" in css
     assert "text-overflow: ellipsis" in css
+    assert "-webkit-line-clamp: 2" in css
+    assert "overflow-wrap: anywhere" in css
     assert ".chip-grid" in css
     assert "overflow: hidden" in css
 
@@ -255,6 +260,14 @@ def test_miniapp_mobile_layout_keeps_status_and_form_inside_viewport() -> None:
     assert "#account-subtitle" in css
     assert "overflow-wrap: anywhere" in css
     assert ".panel {\n  padding: 16px;\n  overflow: hidden;" in css
+
+
+def test_miniapp_typography_avoids_heavy_font_weights() -> None:
+    css = read("styles.css")
+
+    heavy_weights = re.findall(r"font-weight:\s*(?:[78]\d\d|9\d\d)", css)
+
+    assert heavy_weights == []
 
 
 def test_miniapp_warns_when_selecting_more_than_fifteen_chats() -> None:

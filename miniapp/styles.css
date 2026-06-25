@@ -41,6 +41,10 @@ body {
   color: var(--text);
 }
 
+body.editing-open {
+  overflow: hidden;
+}
+
 .app-shell {
   width: min(100%, 980px);
   margin: 0 auto;
@@ -71,7 +75,7 @@ body {
   margin: 0 0 2px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
@@ -83,11 +87,13 @@ p {
 
 h1 {
   font-size: 32px;
+  font-weight: 650;
   line-height: 1.05;
 }
 
 h2 {
   font-size: 20px;
+  font-weight: 650;
   line-height: 1.2;
 }
 
@@ -105,7 +111,7 @@ button {
   padding: 0 16px;
   background: var(--brand);
   color: var(--brand-text);
-  font-weight: 750;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -235,7 +241,7 @@ button:disabled {
 }
 
 #account-title {
-  font-weight: 800;
+  font-weight: 600;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -243,7 +249,7 @@ button:disabled {
 #account-subtitle {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -281,7 +287,7 @@ button:disabled {
   padding: 14px 16px 7px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -311,7 +317,7 @@ button:disabled {
   background: color-mix(in srgb, var(--surface) 68%, transparent);
   color: var(--muted);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 600;
 }
 
 .settings-copy {
@@ -322,7 +328,7 @@ button:disabled {
   display: block;
   margin-bottom: 3px;
   font-size: 15px;
-  font-weight: 680;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -345,7 +351,7 @@ button:disabled {
   min-height: 36px;
   padding: 8px 34px 8px 12px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .danger-zone {
@@ -371,7 +377,7 @@ button:disabled {
 
 .settings-row .compact-button {
   min-width: 136px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .accent-panel {
@@ -417,13 +423,13 @@ button:disabled {
 .draft-instruction strong {
   color: var(--text);
   font-size: 15px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .draft-instruction p {
   color: var(--muted);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -441,7 +447,7 @@ button:disabled {
 .weekday-row > span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .weekday-list {
@@ -462,7 +468,7 @@ button:disabled {
   background: color-mix(in srgb, var(--surface-strong) 86%, transparent);
   color: var(--text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .weekday-list input {
@@ -479,7 +485,7 @@ label {
   min-width: 0;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 input,
@@ -575,7 +581,7 @@ textarea {
   background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
   color: var(--muted);
   font-size: 15px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .info-button[aria-expanded="true"] {
@@ -605,7 +611,7 @@ textarea {
 .draft-help-popover p {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -617,7 +623,7 @@ textarea {
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .search-input {
@@ -696,38 +702,51 @@ textarea {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
 }
 
 .group-chip {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+  flex: 0 1 auto;
+  width: fit-content;
   max-width: 100%;
   min-width: 0;
   min-height: 38px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 8px 12px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
   color: var(--text);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .group-chip span {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
 }
 
 .group-chip input {
-  flex: 0 0 auto;
   width: 16px;
+  height: 16px;
   min-height: 16px;
+  margin: 0;
+  padding: 0;
 }
 
 .pagination {
@@ -746,7 +765,7 @@ textarea {
 .pagination span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .empty-chip,
@@ -806,7 +825,7 @@ textarea {
 .post-item p {
   min-width: 0;
   white-space: pre-wrap;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -820,14 +839,14 @@ textarea {
   border-radius: 50%;
   color: var(--muted);
   font-size: 16px;
-  font-weight: 850;
+  font-weight: 600;
   background: color-mix(in srgb, var(--surface-strong) 86%, transparent);
 }
 
 .post-item span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .post-meta {
@@ -845,14 +864,14 @@ textarea {
 .post-meta dt {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .post-meta dd {
   min-width: 0;
   margin: 0;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -921,7 +940,7 @@ textarea {
 
 .audit-item-head strong {
   font-size: 15px;
-  font-weight: 720;
+  font-weight: 600;
   line-height: 1.25;
 }
 
@@ -942,7 +961,7 @@ textarea {
   border-radius: 50%;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .audit-item.done .audit-status-icon {
@@ -1019,7 +1038,7 @@ textarea {
   padding: 4px 9px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .admin-user-meta {
@@ -1036,14 +1055,14 @@ textarea {
 .admin-user-meta dt {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .admin-user-meta dd {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .admin-user-controls {
@@ -1086,7 +1105,7 @@ textarea {
 .admin-stat-card > span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .admin-stat-hero > strong {
@@ -1120,13 +1139,13 @@ textarea {
 .admin-stat-hero dt {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .admin-stat-hero dd {
   margin: 3px 0 0;
   font-size: 18px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .admin-stat-card {
@@ -1146,7 +1165,7 @@ textarea {
 .admin-stat-card p {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .stat-ring {
@@ -1200,7 +1219,7 @@ textarea {
   gap: 10px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .period-row strong {
@@ -1219,7 +1238,7 @@ textarea {
 .admin-stat span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .admin-stat strong {
@@ -1248,7 +1267,7 @@ textarea {
 .audit-meta dt {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .audit-meta dd {
@@ -1318,7 +1337,7 @@ textarea {
   border-radius: 8px;
   padding: 16px;
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .loading-block span {
@@ -1364,6 +1383,83 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.edit-page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow: auto;
+  padding: max(14px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at top left, rgba(36, 129, 204, 0.12), transparent 30rem),
+    linear-gradient(180deg, rgba(24, 160, 88, 0.06), transparent 18rem),
+    var(--bg);
+}
+
+.edit-page-shell {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 980px);
+  min-height: calc(100dvh - 32px);
+  margin: 0 auto;
+}
+
+.edit-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.edit-page-header h2 {
+  font-size: 22px;
+}
+
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.edit-form-layout {
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.edit-form-layout > * {
+  min-width: 0;
+}
+
+.edit-save-bar {
+  position: sticky;
+  bottom: max(0px, env(safe-area-inset-bottom));
+  z-index: 2;
+  margin: 4px -14px -14px;
+  border-top: 1px solid var(--line);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--surface) 98%, transparent);
+}
+
+.edit-save-bar button {
+  width: 100%;
+}
+
 .modal-close {
   position: absolute;
   top: 12px;
@@ -1378,7 +1474,7 @@ textarea {
   background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
   color: var(--text);
   font-size: 24px;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1;
 }
 
@@ -1388,9 +1484,10 @@ textarea {
   padding: 12px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
   color: var(--text);
-  font-weight: 750;
+  font-weight: 500;
   line-height: 1.35;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 720px) {
@@ -1471,5 +1568,31 @@ textarea {
   .post-meta div {
     grid-template-columns: 1fr;
     gap: 2px;
+  }
+
+  .edit-page {
+    padding: max(10px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .edit-page-shell {
+    min-height: calc(100dvh - 22px);
+  }
+
+  .edit-page-header {
+    align-items: start;
+    padding: 12px;
+  }
+
+  .edit-page-header h2 {
+    font-size: 20px;
+  }
+
+  .edit-form-layout {
+    padding: 12px;
+  }
+
+  .edit-save-bar {
+    margin: 2px -12px -12px;
+    padding: 10px 12px;
   }
 }
