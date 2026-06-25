@@ -1,6 +1,7 @@
 const tg = window.Telegram?.WebApp;
 const initData = tg?.initData || "";
 const apiBase = window.location.pathname.startsWith("/scheduler") ? "/scheduler/api" : "/api";
+const riskyChatSelectionLimit = 15;
 
 if (tg) {
   tg.ready();
@@ -407,6 +408,27 @@ async function confirmSpamRiskIfNeeded(intervalMinutes) {
   return window.confirm(`${message}\n\nПродолжить?`);
 }
 
+function showLargeChatSelectionWarning(count) {
+  const message = `Вы выбрали ${count} чатов. Массовая отправка больше чем в ${riskyChatSelectionLimit} чатов может быть опасной и привести к блокировке Telegram-аккаунта. Продолжайте только на свой страх и риск.`;
+
+  if (tg?.showPopup) {
+    tg.showPopup({
+      title: "Риск блокировки",
+      message,
+      buttons: [{ id: "understand", type: "default", text: "Понятно" }],
+    });
+    return;
+  }
+
+  window.alert(message);
+}
+
+function warnIfLargeChatSelection(previousCount, currentCount) {
+  if (previousCount <= riskyChatSelectionLimit && currentCount > riskyChatSelectionLimit) {
+    showLargeChatSelectionWarning(currentCount);
+  }
+}
+
 async function confirmDeletePost(post) {
   const isDraft = post.status === "draft";
   const message = isDraft
@@ -683,11 +705,13 @@ function renderGroupPicker() {
         const input = label.querySelector("input");
         input.checked = state.selectedChatIds.has(chat.id);
         input.addEventListener("change", () => {
+          const previousCount = state.selectedChatIds.size;
           if (input.checked) {
             state.selectedChatIds.add(chat.id);
           } else {
             state.selectedChatIds.delete(chat.id);
           }
+          warnIfLargeChatSelection(previousCount, state.selectedChatIds.size);
           state.groupPage = 1;
           renderGroupPicker();
         });
@@ -833,11 +857,13 @@ function renderEditGroupPicker() {
         const input = label.querySelector("input");
         input.checked = state.editSelectedChatIds.has(chat.id);
         input.addEventListener("change", () => {
+          const previousCount = state.editSelectedChatIds.size;
           if (input.checked) {
             state.editSelectedChatIds.add(chat.id);
           } else {
             state.editSelectedChatIds.delete(chat.id);
           }
+          warnIfLargeChatSelection(previousCount, state.editSelectedChatIds.size);
           state.editGroupPage = 1;
           renderEditGroupPicker();
         });

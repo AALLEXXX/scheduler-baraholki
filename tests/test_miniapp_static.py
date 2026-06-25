@@ -196,6 +196,17 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "[hidden]" in css
 
 
+def test_miniapp_warns_when_selecting_more_than_fifteen_chats() -> None:
+    js = read("app.js")
+
+    assert "riskyChatSelectionLimit = 15" in js
+    assert "showLargeChatSelectionWarning" in js
+    assert "warnIfLargeChatSelection(previousCount, state.selectedChatIds.size)" in js
+    assert "warnIfLargeChatSelection(previousCount, state.editSelectedChatIds.size)" in js
+    assert "может быть опасной" in js
+    assert "на свой страх и риск" in js
+
+
 def test_miniapp_has_audit_tab_with_top_pagination() -> None:
     html = read("index.html")
     js = read("app.js")
