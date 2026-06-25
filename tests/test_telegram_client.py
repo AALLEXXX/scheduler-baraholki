@@ -531,6 +531,12 @@ def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, d
                         exclude_peers=[types.InputPeerChannel(456, 0)],
                         groups=True,
                     ),
+                    types.DialogFilterChatlist(
+                        id=6,
+                        title=types.TextWithEntities(text="Чатлист", entities=[]),
+                        pinned_peers=[],
+                        include_peers=[types.InputPeerChannel(456, 0)],
+                    ),
                 ]
             )
 
@@ -542,6 +548,7 @@ def test_list_dialog_folders_from_session_returns_folder_chat_ids(monkeypatch, d
     assert folders == [
         {"id": 4, "title": "Барахолки", "telegram_chat_ids": [-1000000000123]},
         {"id": 5, "title": "Все группы", "telegram_chat_ids": [-1000000000123]},
+        {"id": 6, "title": "Чатлист", "telegram_chat_ids": [-1000000000456]},
     ]
     assert fake_client.disconnected is True
 

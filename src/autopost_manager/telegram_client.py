@@ -556,7 +556,7 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
             folders = getattr(folder_response, "filters", folder_response)
             rows: list[dict[str, object]] = []
             for folder in folders:
-                if not isinstance(folder, types.DialogFilter):
+                if not isinstance(folder, (types.DialogFilter, types.DialogFilterChatlist)):
                     continue
                 chat_ids = folder_chat_ids(folder, dialogs)
                 if not chat_ids:
