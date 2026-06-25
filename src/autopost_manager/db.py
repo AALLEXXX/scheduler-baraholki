@@ -35,6 +35,8 @@ def ensure_runtime_columns() -> None:
         "ALTER TYPE schedulekind ADD VALUE IF NOT EXISTS 'weekends'",
         "ALTER TYPE schedulekind ADD VALUE IF NOT EXISTS 'every_other_day'",
         "ALTER TYPE schedulekind ADD VALUE IF NOT EXISTS 'custom_weekdays'",
+        "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false",
+        "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_send_limit INTEGER",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS owner_telegram_id BIGINT",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS api_id INTEGER",
         "ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS api_hash VARCHAR(160)",

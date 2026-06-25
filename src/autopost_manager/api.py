@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 from aiogram import Bot
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -48,6 +48,10 @@ from autopost_manager.schemas import (
     AccountPasswordConfirm,
     AccountRevokeOut,
     AccountStartLogin,
+    AdminStatsOut,
+    AdminUserOut,
+    AdminUserPageOut,
+    AdminUserUpdate,
     AppConfigOut,
     AuditItemOut,
     AuditPageOut,
@@ -64,7 +68,7 @@ from autopost_manager.schemas import (
     TelegramSessionOut,
     UserSettingsOut,
 )
-from autopost_manager.security import require_user
+from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
@@ -281,13 +285,73 @@ def autopost_paused(
     return bool(settings and settings.autopost_paused)
 
 
+def is_admin_id(telegram_user_id: int | None) -> bool:
+    if telegram_user_id is None:
+        return False
+    settings = get_settings()
+    if settings.app_env == "local" and not settings.admin_ids:
+        return True
+    return telegram_user_id in settings.admin_ids
+
+
+def optional_telegram_user_id(
+    x_telegram_init_data: str | None = Header(default=None),
+) -> int | None:
+    settings = get_settings()
+    if settings.app_env == "local" and not x_telegram_init_data:
+        return 0
+    if not x_telegram_init_data:
+        return None
+    try:
+        return verify_webapp_init_data(x_telegram_init_data, settings.bot_token)
+    except ValueError:
+        return None
+
+
+def require_admin_user(telegram_user_id: int = Depends(require_user)) -> int:
+    if not is_admin_id(telegram_user_id):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return telegram_user_id
+
+
+def day_start() -> datetime:
+    now = datetime.now(UTC)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def sent_since(db: Session, *, telegram_user_id: int | None = None, since: datetime | None = None) -> int:
+    query = select(func.count()).select_from(PublishJob).where(PublishJob.status == JobStatus.done)
+    if telegram_user_id is not None:
+        query = query.join(Post, PublishJob.post_id == Post.id).where(
+            Post.created_by_telegram_id == telegram_user_id,
+        )
+    if since is not None:
+        query = query.where(PublishJob.updated_at >= since)
+    return int(db.scalar(query) or 0)
+
+
+def failed_total(db: Session, *, telegram_user_id: int | None = None) -> int:
+    query = select(func.count()).select_from(PublishJob).where(PublishJob.status == JobStatus.failed)
+    if telegram_user_id is not None:
+        query = query.join(Post, PublishJob.post_id == Post.id).where(
+            Post.created_by_telegram_id == telegram_user_id,
+        )
+    return int(db.scalar(query) or 0)
+
+
 def require_autopost_enabled(
     *,
     telegram_user_id: int,
     db: Session,
 ) -> None:
-    if autopost_paused(telegram_user_id=telegram_user_id, db=db):
+    settings = db.get(UserSettings, telegram_user_id)
+    if settings and settings.banned:
+        raise HTTPException(status_code=403, detail="Пользователь заблокирован администратором")
+    if settings and settings.autopost_paused:
         raise HTTPException(status_code=409, detail="Автопостинг на паузе")
+    if settings and settings.daily_send_limit is not None:
+        if sent_since(db, telegram_user_id=telegram_user_id, since=day_start()) >= settings.daily_send_limit:
+            raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
 
 
 def require_active_account(
@@ -449,8 +513,11 @@ def api_health() -> dict[str, object]:
 
 
 @app.get("/api/app-config", response_model=AppConfigOut)
-def app_config() -> AppConfigOut:
-    return AppConfigOut(bot_username=get_settings().bot_username)
+def app_config(telegram_user_id: int | None = Depends(optional_telegram_user_id)) -> AppConfigOut:
+    return AppConfigOut(
+        bot_username=get_settings().bot_username,
+        is_admin=is_admin_id(telegram_user_id),
+    )
 
 
 @app.get("/api/user-settings", response_model=UserSettingsOut)
@@ -1129,6 +1196,140 @@ def list_audit(
         page=page,
         page_size=page_size,
         total=total or 0,
+    )
+
+
+def admin_user_out(db: Session, telegram_user_id: int) -> AdminUserOut:
+    session = db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+        .order_by(TelegramSession.updated_at.desc())
+    ).first()
+    settings = db.get(UserSettings, telegram_user_id)
+    return AdminUserOut(
+        telegram_user_id=telegram_user_id,
+        username=session.username if session else None,
+        phone=session.phone if session else None,
+        session_status=session.status if session else None,
+        autopost_paused=bool(settings and settings.autopost_paused),
+        banned=bool(settings and settings.banned),
+        daily_send_limit=settings.daily_send_limit if settings else None,
+        sent_today=sent_since(db, telegram_user_id=telegram_user_id, since=day_start()),
+        failed_total=failed_total(db, telegram_user_id=telegram_user_id),
+    )
+
+
+@app.get("/api/admin/users", response_model=AdminUserPageOut)
+def admin_list_users(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    query: str = "",
+    _admin_id: int = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserPageOut:
+    sessions = list(
+        db.scalars(
+            select(TelegramSession)
+            .where(TelegramSession.owner_telegram_id.is_not(None))
+            .order_by(TelegramSession.updated_at.desc())
+        )
+    )
+    seen: set[int] = set()
+    owner_ids: list[int] = []
+    clean_query = query.strip().lower()
+    for session in sessions:
+        owner_id = int(session.owner_telegram_id)
+        if owner_id in seen:
+            continue
+        searchable = " ".join(
+            value
+            for value in [
+                str(owner_id),
+                session.username or "",
+                session.phone or "",
+                session.name or "",
+            ]
+            if value
+        ).lower()
+        if clean_query and clean_query not in searchable:
+            continue
+        seen.add(owner_id)
+        owner_ids.append(owner_id)
+
+    start = (page - 1) * page_size
+    page_owner_ids = owner_ids[start : start + page_size]
+    return AdminUserPageOut(
+        items=[admin_user_out(db, owner_id) for owner_id in page_owner_ids],
+        page=page,
+        page_size=page_size,
+        total=len(owner_ids),
+    )
+
+
+@app.patch("/api/admin/users/{telegram_user_id}", response_model=AdminUserOut)
+def admin_update_user(
+    telegram_user_id: int,
+    payload: AdminUserUpdate,
+    _admin_id: int = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserOut:
+    has_session = db.scalar(
+        select(func.count())
+        .select_from(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == telegram_user_id)
+    )
+    if not has_session and not db.get(UserSettings, telegram_user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
+    if payload.banned is not None:
+        settings.banned = payload.banned
+    if payload.autopost_paused is not None:
+        settings.autopost_paused = payload.autopost_paused
+        if payload.autopost_paused:
+            cancel_user_pending_jobs(telegram_user_id=telegram_user_id, db=db)
+    if "daily_send_limit" in payload.model_fields_set:
+        settings.daily_send_limit = payload.daily_send_limit or None
+    db.commit()
+    return admin_user_out(db, telegram_user_id)
+
+
+@app.get("/api/admin/stats", response_model=AdminStatsOut)
+def admin_stats(
+    _admin_id: int = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminStatsOut:
+    now = datetime.now(UTC)
+    today = day_start()
+    week_start = now - timedelta(days=7)
+    month_start = now - timedelta(days=30)
+    users_total = int(
+        db.scalar(
+            select(func.count(func.distinct(TelegramSession.owner_telegram_id))).where(
+                TelegramSession.owner_telegram_id.is_not(None),
+            )
+        )
+        or 0
+    )
+    daily_active_users = int(
+        db.scalar(
+            select(func.count(func.distinct(Post.created_by_telegram_id)))
+            .select_from(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .where(PublishJob.status == JobStatus.done)
+            .where(PublishJob.updated_at >= today)
+            .where(Post.created_by_telegram_id.is_not(None))
+        )
+        or 0
+    )
+    return AdminStatsOut(
+        sent_total=sent_since(db),
+        sent_today=sent_since(db, since=today),
+        sent_week=sent_since(db, since=week_start),
+        sent_month=sent_since(db, since=month_start),
+        failed_total=failed_total(db),
+        users_total=users_total,
+        daily_active_users=daily_active_users,
     )
 
 

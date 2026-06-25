@@ -72,6 +72,8 @@ class UserSettings(Base):
 
     telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     autopost_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    daily_send_limit: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

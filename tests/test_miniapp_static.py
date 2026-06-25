@@ -278,6 +278,48 @@ def test_miniapp_supports_rich_schedule_modes() -> None:
     assert "updateScheduleControls" in js
 
 
+def test_miniapp_preserves_folder_picker_and_falls_back_when_folder_api_fails() -> None:
+    js = read("app.js")
+
+    assert 'api("folders").catch(() => state.folders)' in js
+    assert "function folderItems" in js
+    assert '{ id: "all", title: "Все"' in js
+    assert "renderFolderPicker()" in js
+    assert "renderEditFolderPicker()" in js
+
+
+def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
+    html = read("index.html")
+    js = read("app.js")
+    css = read("styles.css")
+
+    for element_id in [
+        "admin-tab-button",
+        "admin-tabs",
+        "admin-users",
+        "admin-stats",
+        "admin-user-search",
+        "admin-user-list",
+        "admin-users-pagination",
+        "admin-stats-grid",
+    ]:
+        assert f'id="{element_id}"' in html
+        assert f"#{element_id}" in js
+
+    assert 'data-tab="admin"' in html
+    assert 'data-admin-tab="users"' in html
+    assert 'data-admin-tab="stats"' in html
+    assert "isAdmin()" in js
+    assert 'api(`admin/users?page=${state.adminUsers.page}' in js
+    assert 'api("admin/stats")' in js
+    assert 'api(`admin/users/${telegramUserId}`' in js
+    assert "daily_send_limit" in js
+    assert "Забанить" in js
+    assert "Остановить" in js
+    assert ".admin-list" in css
+    assert ".admin-stats-grid" in css
+
+
 def test_miniapp_cache_bust_versions_match_for_css_and_js() -> None:
     html = read("index.html")
     versions = re.findall(r"[.?&]v=(\d{8}-\d+)", html)

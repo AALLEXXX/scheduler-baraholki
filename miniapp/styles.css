@@ -141,7 +141,7 @@ button:disabled {
 
 .tab-bar {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 14px;
   border: 1px solid var(--line);
@@ -759,6 +759,136 @@ textarea {
   color: var(--ok);
 }
 
+.admin-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.admin-tab-button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  color: var(--muted);
+}
+
+.admin-tab-button.selected {
+  border-color: color-mix(in srgb, var(--brand) 60%, transparent);
+  background: color-mix(in srgb, var(--brand) 16%, var(--surface-strong));
+  color: var(--text);
+}
+
+.admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-user {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.55fr);
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.admin-user.banned {
+  border-color: rgba(217, 45, 32, 0.32);
+}
+
+.admin-user.paused {
+  border-color: rgba(247, 144, 9, 0.34);
+}
+
+.admin-user-main,
+.admin-user-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-user-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-user-title strong {
+  overflow-wrap: anywhere;
+}
+
+.admin-user-title span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.admin-user-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.admin-user-meta div {
+  min-width: 0;
+}
+
+.admin-user-meta dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.admin-user-meta dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.admin-user-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.admin-user-controls label {
+  grid-column: span 2;
+}
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-stat {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.admin-stat span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-stat strong {
+  font-size: 26px;
+  line-height: 1;
+}
+
 .audit-item.failed .audit-status-icon {
   background: rgba(217, 45, 32, 0.14);
   border-color: rgba(217, 45, 32, 0.32);
@@ -890,8 +1020,18 @@ textarea {
   }
 
   .draft-card,
-  .post-item {
+  .post-item,
+  .admin-user,
+  .admin-stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-user-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-user-controls label {
+    grid-column: auto;
   }
 
   .post-title-row,

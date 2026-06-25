@@ -76,6 +76,7 @@ def make_session(
     owner_id: int = 111,
     name: str | None = None,
     phone: str = "+10000000000",
+    username: str | None = None,
     status: SessionStatus = SessionStatus.active,
     last_send_at: datetime | None = None,
 ) -> TelegramSession:
@@ -85,7 +86,7 @@ def make_session(
         name=name or f"session-{owner_id}-{suffix}",
         phone=phone,
         telegram_user_id=owner_id + 10_000,
-        username=f"user{owner_id}",
+        username=username or f"user{owner_id}",
         api_id=123456,
         api_hash="0123456789abcdef0123456789abcdef",
         session_path=f"/tmp/autopost-tests/{suffix}",

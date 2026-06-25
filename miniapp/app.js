@@ -17,6 +17,11 @@ const state = {
   posts: [],
   audit: { items: [], page: 1, page_size: 20, total: 0 },
   auditLoading: false,
+  adminTab: "users",
+  adminUsers: { items: [], page: 1, page_size: 10, total: 0 },
+  adminStats: null,
+  adminLoading: false,
+  adminUserSearch: "",
   activeTab: "posts",
   pendingSessionId: null,
   pendingPhone: "",
@@ -49,6 +54,10 @@ function activeSessions() {
 
 function isAutopostPaused() {
   return Boolean(state.settings?.autopost_paused);
+}
+
+function isAdmin() {
+  return Boolean(state.config?.is_admin);
 }
 
 function draftPosts() {
@@ -463,6 +472,10 @@ function render() {
   const drafts = draftPosts();
   const queued = queuePosts();
 
+  if (state.activeTab === "admin" && !isAdmin()) {
+    state.activeTab = "posts";
+  }
+
   applyTabVisibility();
 
   document.querySelector("#posts-count").textContent = `${queued.length} постов`;
@@ -518,10 +531,15 @@ function render() {
   }
 
   renderAudit();
+  renderAdmin();
   applyTabVisibility();
 }
 
 function applyTabVisibility() {
+  const adminTabButton = document.querySelector("#admin-tab-button");
+  if (adminTabButton) {
+    adminTabButton.hidden = !isAdmin();
+  }
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.classList.toggle("selected", button.dataset.tab === state.activeTab);
   });
@@ -684,6 +702,142 @@ function renderAuditItem(item) {
       ? `Отправлено${item.telegram_message_id ? `, message id ${item.telegram_message_id}` : ""}`
       : item.last_error || auditStatusLabel(item.status);
   return node;
+}
+
+function adminStatusSummary(user) {
+  if (user.banned) return "Забанен";
+  if (user.autopost_paused) return "Остановлен";
+  return user.session_status || "без сессии";
+}
+
+function renderAdmin() {
+  const adminPanel = document.querySelector('[data-tab-panel="admin"]');
+  if (!adminPanel || !isAdmin()) return;
+  if (
+    !document.querySelector("#admin-tabs") ||
+    !document.querySelector("#admin-users") ||
+    !document.querySelector("#admin-stats")
+  ) {
+    return;
+  }
+
+  document.querySelectorAll(".admin-tab-button").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.adminTab === state.adminTab);
+  });
+  document.querySelectorAll("[data-admin-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.adminPanel !== state.adminTab;
+  });
+
+  renderAdminUsers();
+  renderAdminStats();
+}
+
+function renderAdminUsers() {
+  const list = document.querySelector("#admin-user-list");
+  const pagination = document.querySelector("#admin-users-pagination");
+  if (!list || !pagination) return;
+
+  if (state.adminLoading && state.adminTab === "users") {
+    list.replaceChildren(loadingBlock("Загружаем пользователей"));
+    return;
+  }
+
+  if (!state.adminUsers.items.length) {
+    list.replaceChildren(emptyPost("Пользователи не найдены"));
+  } else {
+    list.replaceChildren(...state.adminUsers.items.map(renderAdminUser));
+  }
+
+  const pages = pageCount(state.adminUsers.total || 0, state.adminUsers.page_size);
+  pagination.hidden = (state.adminUsers.total || 0) <= state.adminUsers.page_size;
+  document.querySelector("#admin-users-page").textContent = `${state.adminUsers.page} / ${pages}`;
+  document.querySelector("#admin-users-prev").disabled = state.adminUsers.page <= 1;
+  document.querySelector("#admin-users-next").disabled = state.adminUsers.page >= pages;
+}
+
+function renderAdminUser(user) {
+  const node = document.createElement("article");
+  node.className = `admin-user ${user.banned ? "banned" : user.autopost_paused ? "paused" : ""}`.trim();
+  node.innerHTML = `
+    <div class="admin-user-main">
+      <div class="admin-user-title">
+        <strong data-field="title"></strong>
+        <span data-field="status"></span>
+      </div>
+      <dl class="admin-user-meta">
+        <div><dt>ID</dt><dd data-field="id"></dd></div>
+        <div><dt>Телефон</dt><dd data-field="phone"></dd></div>
+        <div><dt>Сегодня</dt><dd data-field="sent"></dd></div>
+        <div><dt>Ошибки</dt><dd data-field="failed"></dd></div>
+      </dl>
+    </div>
+    <div class="admin-user-controls">
+      <button class="danger-button compact-button" type="button" data-action="ban"></button>
+      <button class="secondary-button compact-button" type="button" data-action="pause"></button>
+      <label>
+        Лимит/день
+        <input data-field="limit" type="number" min="0" inputmode="numeric" />
+      </label>
+      <button class="compact-button" type="button" data-action="limit">Сохранить лимит</button>
+    </div>
+  `;
+  node.querySelector('[data-field="title"]').textContent = user.username ? `@${user.username}` : `User ${user.telegram_user_id}`;
+  node.querySelector('[data-field="status"]').textContent = adminStatusSummary(user);
+  node.querySelector('[data-field="id"]').textContent = String(user.telegram_user_id);
+  node.querySelector('[data-field="phone"]').textContent = user.phone || "нет";
+  node.querySelector('[data-field="sent"]').textContent = String(user.sent_today || 0);
+  node.querySelector('[data-field="failed"]').textContent = String(user.failed_total || 0);
+  const limitInput = node.querySelector('[data-field="limit"]');
+  limitInput.value = user.daily_send_limit ?? "";
+  node.querySelector('[data-action="ban"]').textContent = user.banned ? "Разбанить" : "Забанить";
+  node.querySelector('[data-action="pause"]').textContent = user.autopost_paused ? "Возобновить" : "Остановить";
+  node.querySelector('[data-action="ban"]').addEventListener("click", () => {
+    updateAdminUser(user.telegram_user_id, { banned: !user.banned }).catch((error) => notify(error.message, "error"));
+  });
+  node.querySelector('[data-action="pause"]').addEventListener("click", () => {
+    updateAdminUser(user.telegram_user_id, { autopost_paused: !user.autopost_paused }).catch((error) =>
+      notify(error.message, "error"),
+    );
+  });
+  node.querySelector('[data-action="limit"]').addEventListener("click", () => {
+    const rawLimit = limitInput.value.trim();
+    const daily_send_limit = rawLimit === "" ? null : Number(rawLimit);
+    updateAdminUser(user.telegram_user_id, { daily_send_limit }).catch((error) => notify(error.message, "error"));
+  });
+  return node;
+}
+
+function renderAdminStats() {
+  const grid = document.querySelector("#admin-stats-grid");
+  if (!grid) return;
+  if (state.adminLoading && state.adminTab === "stats") {
+    grid.replaceChildren(loadingBlock("Загружаем статистику"));
+    return;
+  }
+  const stats = state.adminStats;
+  if (!stats) {
+    grid.replaceChildren(emptyPost("Статистика пока не загружена"));
+    return;
+  }
+  const items = [
+    ["Всего отправлено", stats.sent_total],
+    ["Сегодня", stats.sent_today],
+    ["За неделю", stats.sent_week],
+    ["За месяц", stats.sent_month],
+    ["Неудачных отправок", stats.failed_total],
+    ["Всего юзеров", stats.users_total],
+    ["Активны сегодня", stats.daily_active_users],
+  ];
+  grid.replaceChildren(
+    ...items.map(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "admin-stat";
+      item.innerHTML = `<span></span><strong></strong>`;
+      item.querySelector("span").textContent = label;
+      item.querySelector("strong").textContent = String(value ?? 0);
+      return item;
+    }),
+  );
 }
 
 function renderGroupPicker() {
@@ -940,7 +1094,7 @@ async function load(options = {}) {
     api("user-settings"),
     api("sessions"),
     api("chats"),
-    api("folders"),
+    api("folders").catch(() => state.folders),
     api("posts"),
   ]);
   state.config = config;
@@ -972,6 +1126,9 @@ async function load(options = {}) {
   if (state.activeTab === "audit") {
     await loadAudit();
   }
+  if (state.activeTab === "admin" && isAdmin()) {
+    await loadAdminDashboard();
+  }
 }
 
 async function loadAudit(options = {}) {
@@ -983,6 +1140,51 @@ async function loadAudit(options = {}) {
     state.auditLoading = false;
     render();
   }
+}
+
+async function loadAdminUsers(options = {}) {
+  if (!isAdmin()) return;
+  state.adminLoading = true;
+  if (options.renderFirst) render();
+  try {
+    const query = encodeURIComponent(state.adminUserSearch.trim());
+    state.adminUsers = await api(`admin/users?page=${state.adminUsers.page}&page_size=${state.adminUsers.page_size}&query=${query}`);
+  } finally {
+    state.adminLoading = false;
+    render();
+  }
+}
+
+async function loadAdminStats(options = {}) {
+  if (!isAdmin()) return;
+  state.adminLoading = true;
+  if (options.renderFirst) render();
+  try {
+    state.adminStats = await api("admin/stats");
+  } finally {
+    state.adminLoading = false;
+    render();
+  }
+}
+
+async function loadAdminDashboard(options = {}) {
+  if (state.adminTab === "stats") {
+    await loadAdminStats(options);
+    return;
+  }
+  await loadAdminUsers(options);
+}
+
+async function updateAdminUser(telegramUserId, patch) {
+  const updated = await api(`admin/users/${telegramUserId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  state.adminUsers.items = state.adminUsers.items.map((user) =>
+    user.telegram_user_id === updated.telegram_user_id ? updated : user,
+  );
+  notify("Пользователь обновлён.");
+  render();
 }
 
 async function syncGroups(options = {}) {
@@ -1061,7 +1263,18 @@ document.querySelectorAll(".tab-button").forEach((button) => {
       loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
       return;
     }
+    if (state.activeTab === "admin") {
+      loadAdminDashboard({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+      return;
+    }
     render();
+  });
+});
+
+document.querySelectorAll(".admin-tab-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.adminTab = button.dataset.adminTab;
+    loadAdminDashboard({ renderFirst: true }).catch((error) => notify(error.message, "error"));
   });
 });
 
@@ -1145,6 +1358,12 @@ document.querySelector("#edit-group-search").addEventListener("input", (event) =
   renderEditGroupPicker();
 });
 
+document.querySelector("#admin-user-search").addEventListener("input", (event) => {
+  state.adminUserSearch = event.target.value;
+  state.adminUsers.page = 1;
+  loadAdminUsers({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+});
+
 document.querySelector("#edit-groups-prev").addEventListener("click", () => {
   state.editGroupPage -= 1;
   renderEditGroupPicker();
@@ -1153,6 +1372,16 @@ document.querySelector("#edit-groups-prev").addEventListener("click", () => {
 document.querySelector("#edit-groups-next").addEventListener("click", () => {
   state.editGroupPage += 1;
   renderEditGroupPicker();
+});
+
+document.querySelector("#admin-users-prev").addEventListener("click", () => {
+  state.adminUsers.page -= 1;
+  loadAdminUsers({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#admin-users-next").addEventListener("click", () => {
+  state.adminUsers.page += 1;
+  loadAdminUsers({ renderFirst: true }).catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#edit-close").addEventListener("click", closeEditPost);

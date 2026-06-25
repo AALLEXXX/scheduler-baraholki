@@ -1244,3 +1244,133 @@ def test_audit_requires_active_account(client, auth_user, db_session) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "page": 1, "page_size": 20, "total": 0}
+
+
+def test_admin_endpoints_require_configured_admin(client, auth_user, db_session) -> None:
+    auth_user(111)
+    make_session(db_session, owner_id=111, username="regular")
+    db_session.commit()
+
+    response = client.get("/api/admin/users")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
+def test_admin_lists_users_with_search_and_pagination(client, auth_user, db_session, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "999")
+    auth_user(999)
+    first = make_session(db_session, owner_id=111, username="alice_market", phone="+111")
+    second = make_session(db_session, owner_id=222, username="bob_shop", phone="+222")
+    db_session.add(UserSettings(telegram_user_id=111, autopost_paused=True, daily_send_limit=7))
+    chat = make_chat(db_session, first, title="Main")
+    post = make_post(db_session, owner_id=111, session=first, chats=[chat])
+    make_job(db_session, post, chat, session=first, status=JobStatus.done)
+    make_job(db_session, post, chat, session=first, status=JobStatus.failed)
+    db_session.commit()
+
+    response = client.get("/api/admin/users", params={"query": "alice", "page": 1, "page_size": 1})
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["page"] == 1
+    assert data["page_size"] == 1
+    assert data["total"] == 1
+    assert data["items"][0]["telegram_user_id"] == 111
+    assert data["items"][0]["username"] == "alice_market"
+    assert data["items"][0]["phone"] == "+111"
+    assert data["items"][0]["autopost_paused"] is True
+    assert data["items"][0]["banned"] is False
+    assert data["items"][0]["daily_send_limit"] == 7
+    assert data["items"][0]["sent_today"] == 1
+    assert data["items"][0]["failed_total"] == 1
+    assert second.username == "bob_shop"
+
+
+def test_admin_updates_user_controls(client, auth_user, db_session, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "999")
+    auth_user(999)
+    make_session(db_session, owner_id=111, username="alice")
+    db_session.commit()
+
+    response = client.patch(
+        "/api/admin/users/111",
+        json={"banned": True, "autopost_paused": True, "daily_send_limit": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["telegram_user_id"] == 111
+    assert data["banned"] is True
+    assert data["autopost_paused"] is True
+    assert data["daily_send_limit"] == 3
+    with SessionLocal() as db:
+        settings = db.get(UserSettings, 111)
+        assert settings.banned is True
+        assert settings.autopost_paused is True
+        assert settings.daily_send_limit == 3
+
+
+def test_banned_user_cannot_schedule_posts(client, auth_user, db_session) -> None:
+    auth_user(111)
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    db_session.add(UserSettings(telegram_user_id=111, banned=True))
+    db_session.commit()
+
+    response = client.post("/api/posts", json=post_payload(str(session.id), [str(chat.id)]))
+
+    assert response.status_code == 403
+    assert "заблокирован" in response.text
+
+
+def test_daily_send_limit_blocks_new_schedules_after_sent_jobs(client, auth_user, db_session) -> None:
+    auth_user(111)
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    make_job(db_session, post, chat, session=session, status=JobStatus.done)
+    db_session.add(UserSettings(telegram_user_id=111, daily_send_limit=1))
+    db_session.commit()
+
+    response = client.post("/api/posts", json=post_payload(str(session.id), [str(chat.id)]))
+
+    assert response.status_code == 429
+    assert "дневной лимит" in response.text
+
+
+def test_admin_statistics_returns_global_delivery_metrics(client, auth_user, db_session, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "999")
+    auth_user(999)
+    first = make_session(db_session, owner_id=111)
+    second = make_session(db_session, owner_id=222)
+    chat = make_chat(db_session, first)
+    other_chat = make_chat(db_session, second)
+    post = make_post(db_session, owner_id=111, session=first, chats=[chat])
+    other_post = make_post(db_session, owner_id=222, session=second, chats=[other_chat])
+    old_done = make_job(
+        db_session,
+        post,
+        chat,
+        session=first,
+        status=JobStatus.done,
+        due_at=datetime.now(UTC) - timedelta(days=40),
+    )
+    old_done.updated_at = datetime.now(UTC) - timedelta(days=40)
+    done_today = make_job(db_session, post, chat, session=first, status=JobStatus.done)
+    done_today.updated_at = datetime.now(UTC)
+    failed_today = make_job(db_session, other_post, other_chat, session=second, status=JobStatus.failed)
+    failed_today.updated_at = datetime.now(UTC)
+    db_session.commit()
+
+    response = client.get("/api/admin/stats")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["sent_total"] == 2
+    assert data["sent_today"] == 1
+    assert data["sent_week"] == 1
+    assert data["sent_month"] == 1
+    assert data["failed_total"] == 1
+    assert data["users_total"] == 2
+    assert data["daily_active_users"] == 1
