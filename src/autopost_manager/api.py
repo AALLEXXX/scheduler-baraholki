@@ -1199,15 +1199,7 @@ def list_jobs(
     if not active_account(telegram_user_id=telegram_user_id, db=db):
         return []
 
-    return list(
-        db.scalars(
-            select(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-            .order_by(PublishJob.created_at.desc())
-            .limit(100)
-        )
-    )
+    return PublishJobRepository(db).list_recent_for_owner(telegram_user_id, limit=100)
 
 
 def list_audit(
