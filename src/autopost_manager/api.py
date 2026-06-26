@@ -39,7 +39,6 @@ from autopost_manager.models import (
     ScheduleKind,
     SessionStatus,
     TargetChat,
-    TargetChatType,
     TelegramSession,
     UserSettings,
 )
@@ -80,6 +79,7 @@ from autopost_manager.services.admin import mask_phone as admin_mask_phone
 from autopost_manager.services.admin import sent_since as admin_sent_since
 from autopost_manager.services.audit import AuditService
 from autopost_manager.services.audit import telegram_message_link as audit_telegram_message_link
+from autopost_manager.services.chats import ChatService
 from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
@@ -979,97 +979,37 @@ async def sync_session_chats(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
-    sender_session = TelegramSessionRepository(db).fetch_owned(session_id, telegram_user_id)
-    if not sender_session:
-        raise HTTPException(status_code=404, detail="Telegram account not found")
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-
-    try:
-        dialogs = await list_dialogs_from_session(sender_session)
-    except RuntimeError as exc:
-        logger.warning("Telegram dialog sync failed: session_id=%s error=%s", sender_session.id, exc)
-        await send_alert(
-            title="Telegram dialog sync error",
-            status="409",
-            fields={
-                "action": "sync_chats",
-                "owner_telegram_id": telegram_user_id,
-                "session_id": sender_session.id,
-                "session_status": sender_session.status.value,
-                "error_type": type(exc).__name__,
-                "error": exc,
-            },
-        )
-        raise HTTPException(status_code=409, detail="Не удалось синхронизировать чаты Telegram") from exc
-
-    imported = 0
-    target_chats = TargetChatRepository(db)
-    for dialog in dialogs:
-        chat_type = TargetChatType.channel if dialog["is_channel"] and not dialog["is_group"] else TargetChatType.supergroup
-        created = target_chats.upsert_synced_dialog(
-            owner_telegram_id=telegram_user_id,
-            session_id=sender_session.id,
-            telegram_chat_id=int(dialog["telegram_chat_id"]),
-            title=str(dialog["title"]),
-            username=dialog["username"] if dialog["username"] else None,
-            chat_type=chat_type,
-        )
-        if created:
-            imported += 1
-    db.commit()
-    return {"imported": imported, "total_dialogs": len(dialogs)}
+    return await ChatService(
+        db=db,
+        list_dialogs=list_dialogs_from_session,
+        list_folders_from_session=list_dialog_folders_from_session,
+        send_alert=send_alert,
+    ).sync_session_chats(session_id=session_id, telegram_user_id=telegram_user_id)
 
 
 def list_chats(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TargetChat]:
-    return TargetChatRepository(db).list_enabled_for_owner(telegram_user_id)
+    return ChatService(
+        db=db,
+        list_dialogs=list_dialogs_from_session,
+        list_folders_from_session=list_dialog_folders_from_session,
+        send_alert=send_alert,
+    ).list_chats(telegram_user_id=telegram_user_id)
 
 
 async def list_folders(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[DialogFolderOut]:
-    sessions = TelegramSessionRepository(db).list_active_for_owner(telegram_user_id)
-    if not sessions:
-        return []
-
-    rows_by_key: dict[tuple[int, str], DialogFolderOut] = {}
-
-    for session in sessions:
-        try:
-            folders = await list_dialog_folders_from_session(session)
-        except RuntimeError as exc:
-            logger.warning("Telegram folder sync failed: session_id=%s error=%s", session.id, exc)
-            await send_alert(
-                title="Telegram folder sync error",
-                status="409",
-                fields={
-                    "action": "sync_folders",
-                    "owner_telegram_id": telegram_user_id,
-                    "session_id": session.id,
-                    "session_status": session.status.value,
-                    "error_type": type(exc).__name__,
-                    "error": exc,
-                },
-            )
-            raise HTTPException(status_code=409, detail="Не удалось синхронизировать папки Telegram") from exc
-
-        for folder in folders:
-            key = (int(folder["id"]), str(folder["title"]))
-            chat_ids = [int(chat_id) for chat_id in folder["telegram_chat_ids"]]
-            if key not in rows_by_key:
-                rows_by_key[key] = DialogFolderOut(
-                    id=key[0],
-                    title=key[1],
-                    telegram_chat_ids=[],
-                )
-            current_ids = rows_by_key[key].telegram_chat_ids
-            current_ids.extend(chat_id for chat_id in chat_ids if chat_id not in current_ids)
-
-    db.commit()
-    return list(rows_by_key.values())
+    return await ChatService(
+        db=db,
+        list_dialogs=list_dialogs_from_session,
+        list_folders_from_session=list_dialog_folders_from_session,
+        send_alert=send_alert,
+    ).list_folders(telegram_user_id=telegram_user_id)
 
 
 def create_chat(
