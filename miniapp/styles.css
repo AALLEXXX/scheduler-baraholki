@@ -954,10 +954,11 @@ textarea {
 }
 
 .audit-item.failed {
-  border-color: rgba(217, 45, 32, 0.32);
+  border-color: rgba(248, 113, 113, 0.34);
   background:
-    linear-gradient(135deg, rgba(217, 45, 32, 0.1), transparent 42%),
-    color-mix(in srgb, var(--surface-strong) 92%, transparent);
+    linear-gradient(135deg, rgba(127, 29, 29, 0.34), transparent 48%),
+    #17212f;
+  color: #f8fafc;
 }
 
 .audit-item.processing,
@@ -1286,9 +1287,31 @@ textarea {
 }
 
 .audit-item.failed .audit-status-icon {
-  background: rgba(217, 45, 32, 0.14);
-  border-color: rgba(217, 45, 32, 0.32);
-  color: var(--danger);
+  background: rgba(248, 113, 113, 0.13);
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fca5a5;
+}
+
+.audit-item.failed .audit-item-head strong,
+.audit-item.failed .audit-meta dd {
+  color: #f8fafc;
+}
+
+.audit-item.failed .audit-item-head p,
+.audit-item.failed .audit-meta dt {
+  color: rgba(203, 213, 225, 0.76);
+}
+
+.audit-item.failed [data-field="result"] {
+  max-height: 132px;
+  overflow: auto;
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.34);
+  color: #fecaca;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .audit-meta {

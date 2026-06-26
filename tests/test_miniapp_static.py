@@ -338,6 +338,9 @@ def test_miniapp_has_audit_tab_with_top_pagination() -> None:
     assert ".audit-pagination" in css
     assert ".audit-actions" in css
     assert ".audit-message-text" in css
+    assert ".audit-item.failed [data-field=\"result\"]" in css
+    assert "#17212f" in css
+    assert "#fecaca" in css
 
 
 def test_miniapp_datetime_inputs_are_constrained_on_mobile() -> None:
