@@ -21,6 +21,15 @@ class TelegramSessionRepository:
             return None
         return session
 
+    def fetch_owned_active(self, session_id: UUID, owner_telegram_id: int) -> TelegramSession | None:
+        session = self.fetch_owned(session_id, owner_telegram_id)
+        if not session or session.status != SessionStatus.active:
+            return None
+        return session
+
+    def name_exists(self, name: str) -> bool:
+        return bool(self.db.scalar(select(TelegramSession.id).where(TelegramSession.name == name)))
+
     def list_for_owner(self, owner_telegram_id: int) -> list[TelegramSession]:
         return list(
             self.db.scalars(

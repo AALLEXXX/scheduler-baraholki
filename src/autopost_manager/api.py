@@ -11,7 +11,6 @@ from pathlib import Path
 import uvicorn
 from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from telethon.errors import (
     FloodWaitError,
@@ -34,7 +33,6 @@ from autopost_manager.models import (
     Post,
     PostStatus,
     PublishJob,
-    RateLimitEvent,
     ScheduleKind,
     SessionStatus,
     TargetChat,
@@ -65,9 +63,12 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     UserSettingsOut,
 )
+from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
+from autopost_manager.repositories.rate_limits import RateLimitRepository
+from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.schedule import WeekdaySet
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.services.admin import AdminService
@@ -318,12 +319,7 @@ def active_account(
     telegram_user_id: int,
     db: Session,
 ) -> TelegramSession | None:
-    return db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == telegram_user_id)
-        .where(TelegramSession.status == SessionStatus.active)
-        .order_by(TelegramSession.updated_at.desc())
-    ).first()
+    return TelegramSessionRepository(db).active_for_owner(telegram_user_id)
 
 
 def telegram_message_link(chat: TargetChat, message_id: int | None) -> str | None:
@@ -335,13 +331,7 @@ def user_settings(
     telegram_user_id: int,
     db: Session,
 ) -> UserSettings:
-    settings = db.get(UserSettings, telegram_user_id)
-    if settings:
-        return settings
-    settings = UserSettings(telegram_user_id=telegram_user_id)
-    db.add(settings)
-    db.flush()
-    return settings
+    return UserSettingsRepository(db).get_or_create(telegram_user_id)
 
 
 def autopost_paused(
@@ -349,7 +339,7 @@ def autopost_paused(
     telegram_user_id: int,
     db: Session,
 ) -> bool:
-    settings = db.get(UserSettings, telegram_user_id)
+    settings = UserSettingsRepository(db).fetch_by_user_id(telegram_user_id)
     return bool(settings and settings.autopost_paused)
 
 
@@ -409,24 +399,12 @@ def check_rate_limit(
 ) -> None:
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=window_seconds)
-    db.execute(
-        delete(RateLimitEvent)
-        .where(RateLimitEvent.scope == scope)
-        .where(RateLimitEvent.created_at < cutoff)
-    )
-    count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(RateLimitEvent)
-            .where(RateLimitEvent.scope == scope)
-            .where(RateLimitEvent.key == key)
-            .where(RateLimitEvent.created_at >= cutoff)
-        )
-        or 0
-    )
+    rate_limits = RateLimitRepository(db)
+    rate_limits.delete_older_than(scope=scope, cutoff=cutoff)
+    count = rate_limits.count_since(scope=scope, key=key, since=cutoff)
     if count >= limit:
         raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
-    db.add(RateLimitEvent(scope=scope, key=key, created_at=now))
+    rate_limits.add_event(scope=scope, key=key, created_at=now)
 
 
 def normalize_phone_key(phone: str) -> str:
@@ -442,24 +420,19 @@ def find_session_by_phone(db: Session, *, owner_telegram_id: int, phone: str) ->
     target_digits = phone_digits(phone)
     if not target_digits:
         return None
-    sessions = db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == owner_telegram_id)
-        .order_by(TelegramSession.created_at.desc())
-    ).all()
+    sessions = TelegramSessionRepository(db).list_for_owner(owner_telegram_id)
     return next((session for session in sessions if phone_digits(session.phone) == target_digits), None)
 
 
 def unique_session_name(db: Session, *, owner_telegram_id: int, safe_phone: str) -> str:
+    sessions = TelegramSessionRepository(db)
     base_name = f"tg_{owner_telegram_id}_{safe_phone or 'account'}"
-    existing = db.scalar(select(TelegramSession.id).where(TelegramSession.name == base_name))
-    if not existing:
+    if not sessions.name_exists(base_name):
         return base_name
 
     for index in range(2, 100):
         candidate = f"{base_name}_{index}"
-        existing = db.scalar(select(TelegramSession.id).where(TelegramSession.name == candidate))
-        if not existing:
+        if not sessions.name_exists(candidate):
             return candidate
     return f"{base_name}_{uuid.uuid4().hex[:8]}"
 
@@ -477,7 +450,7 @@ def require_autopost_enabled(
     telegram_user_id: int,
     db: Session,
 ) -> None:
-    settings = db.get(UserSettings, telegram_user_id)
+    settings = UserSettingsRepository(db).fetch_by_user_id(telegram_user_id)
     if settings and settings.banned:
         raise HTTPException(status_code=403, detail="Пользователь заблокирован администратором")
     if settings and settings.autopost_paused:
@@ -492,15 +465,7 @@ def active_scheduled_posts_count(db: Session, telegram_user_id: int) -> int:
 
 
 def user_sessions_count(db: Session, telegram_user_id: int) -> int:
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .where(TelegramSession.status != SessionStatus.revoked)
-        )
-        or 0
-    )
+    return TelegramSessionRepository(db).count_non_revoked_for_owner(telegram_user_id)
 
 
 def enforce_active_post_limit(
@@ -587,12 +552,7 @@ async def delete_source_messages(
         return BotMessageDeleteResult()
 
     message_ids = sorted({message_id for _chat_id, message_id in refs})
-    session = db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == telegram_user_id)
-        .where(TelegramSession.status == SessionStatus.active)
-        .order_by(TelegramSession.updated_at.desc())
-    ).first()
+    session = TelegramSessionRepository(db).active_for_owner(telegram_user_id)
     if not session:
         return await delete_bot_messages(refs)
 
@@ -681,17 +641,13 @@ def validate_owned_session_and_targets(
     db: Session,
 ) -> None:
     if session_id:
-        session = db.get(TelegramSession, session_id)
-        if (
-            not session
-            or session.owner_telegram_id != telegram_user_id
-            or session.status != SessionStatus.active
-        ):
+        session = TelegramSessionRepository(db).fetch_owned_active(session_id, telegram_user_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Telegram account not found")
 
     for target_chat_id in target_chat_ids:
-        target = db.get(TargetChat, target_chat_id)
-        if not target or target.owner_telegram_id != telegram_user_id or not target.enabled:
+        target = TargetChatRepository(db).fetch_owned_enabled(target_chat_id, telegram_user_id)
+        if not target:
             raise HTTPException(status_code=404, detail="Group not found")
 
 
