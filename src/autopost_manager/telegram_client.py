@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import re
 import tempfile
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import unescape
@@ -14,14 +12,18 @@ import aiohttp
 from sqlalchemy.orm import Session
 from telethon import TelegramClient, functions, types, utils
 from telethon.errors import SessionPasswordNeededError
-from telethon.sessions import SQLiteSession, StringSession
 
 from autopost_manager.config import get_settings
-from autopost_manager.crypto import decrypt_session_string, encrypt_session_string
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
 from autopost_manager.send_errors import classify_send_error as format_send_error
-
-_locks: dict[str, asyncio.Lock] = {}
+from autopost_manager.telegram_runtime import (
+    disconnect_client,
+    remember_client_session,
+    session_lock,
+    telegram_timeout,
+)
+from autopost_manager.telegram_runtime import build_client as runtime_build_client
+from autopost_manager.telegram_runtime import legacy_session_string as runtime_legacy_session_string
 
 
 @dataclass(frozen=True)
@@ -39,71 +41,12 @@ class TelegramMessageSnapshot:
     date: datetime | None = None
 
 
-def _lock_for(session_path: str) -> asyncio.Lock:
-    if session_path not in _locks:
-        _locks[session_path] = asyncio.Lock()
-    return _locks[session_path]
-
-
-@asynccontextmanager
-async def session_lock(session_path: str):
-    lock = _lock_for(session_path)
-    async with lock:
-        lock_path = Path(f"{session_path}.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_file = lock_path.open("a")
-        try:
-            await asyncio.to_thread(fcntl.flock, lock_file.fileno(), fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            lock_file.close()
-
-
 def build_client(session: TelegramSession) -> TelegramClient:
-    settings = get_settings()
-    api_id = session.api_id or settings.telegram_api_id
-    api_hash = session.api_hash or settings.telegram_api_hash
-    session_string = decrypt_session_string(session.session_string)
-    legacy_string = legacy_session_string(session.session_path) if not session_string else ""
-    if legacy_string:
-        session_string = legacy_string
-        session.session_string = encrypt_session_string(legacy_string)
-    return TelegramClient(StringSession(session_string or ""), api_id, api_hash)
+    return runtime_build_client(session, client_class=TelegramClient)
 
 
 def legacy_session_string(session_path: str | None) -> str:
-    if not session_path or not Path(f"{session_path}.session").exists():
-        return ""
-    try:
-        legacy_session = SQLiteSession(session_path)
-        try:
-            return StringSession.save(legacy_session)
-        finally:
-            legacy_session.close()
-    except Exception:
-        return ""
-
-
-def remember_client_session(session: TelegramSession, client) -> None:
-    client_session = getattr(client, "session", None)
-    if not client_session:
-        return
-    session_string = StringSession.save(client_session)
-    if session_string:
-        session.session_string = encrypt_session_string(session_string)
-
-
-async def telegram_timeout(awaitable, timeout_seconds: int | None = None):
-    timeout = timeout_seconds or get_settings().telegram_operation_timeout_seconds
-    return await asyncio.wait_for(awaitable, timeout=timeout)
-
-
-async def disconnect_client(client) -> None:
-    try:
-        await asyncio.wait_for(client.disconnect(), timeout=10)
-    except Exception:
-        pass
+    return runtime_legacy_session_string(session_path)
 
 
 async def send_message_from_session(
