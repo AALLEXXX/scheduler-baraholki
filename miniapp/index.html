@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Baraholki</title>
-    <link rel="stylesheet" href="styles.css?v=20260626-8" />
+    <link rel="stylesheet" href="styles.css?v=20260626-9" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -64,7 +64,14 @@
             </label>
             <label>
               <span data-i18n="connect.phone">Phone</span>
-              <input name="phone_local" autocomplete="tel" inputmode="tel" placeholder="599..." required />
+              <input
+                name="phone_local"
+                autocomplete="tel"
+                inputmode="tel"
+                pattern="[0-9\s()+.-]*"
+                placeholder="599 123 456"
+                required
+              />
             </label>
           </div>
           <button id="send-code" type="submit" data-i18n="connect.getCode">Get code</button>
@@ -249,6 +256,34 @@
             </div>
           </div>
 
+          <div class="settings-section-label" data-i18n="settings.limits">Sending limits</div>
+          <div class="settings-limits-grid">
+            <div class="settings-limit">
+              <span data-i18n="limits.targetsLabel">Chats per post</span>
+              <strong data-i18n="limits.targetsValue">15 max</strong>
+            </div>
+            <div class="settings-limit">
+              <span data-i18n="limits.accountIntervalLabel">Account interval</span>
+              <strong data-i18n="limits.accountIntervalValue">30 sec</strong>
+            </div>
+            <div class="settings-limit">
+              <span data-i18n="limits.repeatLabel">Repeat interval</span>
+              <strong data-i18n="limits.repeatValue">20 min min</strong>
+            </div>
+            <div class="settings-limit">
+              <span data-i18n="limits.queueLabel">Queue per day</span>
+              <strong data-i18n="limits.queueValue">300 jobs</strong>
+            </div>
+            <div class="settings-limit">
+              <span data-i18n="limits.postsLabel">Active posts</span>
+              <strong data-i18n="limits.postsValue">50 max</strong>
+            </div>
+            <div class="settings-limit">
+              <span data-i18n="limits.mediaLabel">Media per post</span>
+              <strong data-i18n="limits.mediaValue">10 max</strong>
+            </div>
+          </div>
+
           <div class="settings-section-label" data-i18n="settings.account">Account</div>
           <div class="settings-row">
             <span class="settings-icon" aria-hidden="true">Ⅱ</span>
@@ -406,6 +441,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js?v=20260626-8"></script>
+    <script src="app.js?v=20260626-9"></script>
   </body>
 </html>

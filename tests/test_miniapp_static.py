@@ -41,6 +41,13 @@ def test_miniapp_login_only_asks_for_phone_number() -> None:
 
     assert 'name="country_code"' in html
     assert 'name="phone_local"' in html
+    assert 'pattern="[0-9\\s()+.-]*"' in html
+    assert "phoneDigits" in js
+    assert "formatPhoneLocal" in js
+    assert "normalizePhoneInput" in js
+    assert "isValidPhone" in js
+    assert 'document.querySelector("input[name=phone_local]").addEventListener("input"' in js
+    assert "validation.phoneInvalid" in js
     assert "loginPhoneFromForm" in js
     assert 'name="api_id"' not in html
     assert 'name="api_hash"' not in html
@@ -208,8 +215,16 @@ def test_miniapp_defaults_to_english_and_can_switch_to_russian() -> None:
     assert '"settings.pauseTitle": "Автопостинг"' in js
     assert '"settings.pauseButton": "Pause sending"' in js
     assert '"settings.pauseButton": "Остановить отправки"' in js
+    assert 'data-i18n="settings.limits"' in html
+    assert 'class="settings-limits-grid"' in html
+    assert 'data-i18n="limits.targetsValue">15 max' in html
+    assert '"limits.targetsValue": "до 15"' in js
+    assert '"limits.accountIntervalValue": "30 сек"' in js
+    assert '"limits.queueValue": "300 задач"' in js
     assert ".settings-section-label" in css
     assert ".settings-control" in css
+    assert ".settings-limits-grid" in css
+    assert ".settings-limit" in css
     assert ".compact-select" in css
 
 
@@ -234,6 +249,8 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert 'api("folders")' in js
     assert "function renderFolderPicker" in js
     assert ".folder-chip" in css
+    assert "flex-wrap: wrap" in css
+    assert ".folder-list" in css
     assert "function renderGroupPicker()" in js
     assert "selectedChatIds" in js
     assert "sortSelectedFirst" in js

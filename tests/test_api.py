@@ -299,6 +299,35 @@ def test_start_login_rejects_invalid_phone_before_telegram(
     assert "код страны" in response.text or "номер телефона" in response.text
 
 
+def test_start_login_normalizes_phone_before_telegram(
+    client,
+    auth_user,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+
+    async def fake_request_login_code(session, *, force_sms=False):
+        assert session.phone == "+18286637535"
+        return SimpleNamespace(
+            phone_code_hash="phone-code-hash",
+            delivery_type="SentCodeTypeApp",
+            next_delivery_type=None,
+            timeout=60,
+        )
+
+    monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "+1 (828) 663-7535"},
+    )
+
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        session = db.query(api_module.TelegramSession).one()
+        assert session.phone == "+18286637535"
+
+
 def test_start_login_updates_existing_session_and_reports_send_error(
     client,
     auth_user,

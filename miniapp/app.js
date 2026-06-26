@@ -59,6 +59,7 @@ const translations = {
     "settings.title": "Settings",
     "settings.hint": "Connection and account controls.",
     "settings.general": "General",
+    "settings.limits": "Sending limits",
     "settings.account": "Account",
     "settings.languageTitle": "Language",
     "settings.languageHint": "Choose the Mini App interface language.",
@@ -70,6 +71,18 @@ const translations = {
     "settings.revokeTitle": "Telegram session",
     "settings.revokeHint": "Removes service access to the account. Telegram may ask for a code again.",
     "settings.revokeButton": "Disconnect",
+    "limits.targetsLabel": "Chats per post",
+    "limits.targetsValue": "15 max",
+    "limits.accountIntervalLabel": "Account interval",
+    "limits.accountIntervalValue": "30 sec",
+    "limits.repeatLabel": "Repeat interval",
+    "limits.repeatValue": "20 min min",
+    "limits.queueLabel": "Queue per day",
+    "limits.queueValue": "300 jobs",
+    "limits.postsLabel": "Active posts",
+    "limits.postsValue": "50 max",
+    "limits.mediaLabel": "Media per post",
+    "limits.mediaValue": "10 max",
     "admin.title": "Admin",
     "admin.hint": "Users, limits, and global delivery statistics.",
     "admin.users": "Users",
@@ -204,6 +217,7 @@ const translations = {
     "validation.chooseWeekday": "Choose at least one weekday.",
     "validation.postMissing": "Post not found. Refresh the page.",
     "validation.phoneRequired": "Enter your phone number first.",
+    "validation.phoneInvalid": "Enter a valid phone number with country code.",
     "spam.minInterval": "Minimum repeat interval is 20 minutes.",
     "spam.riskMessage": "Frequent sending can limit or ban your Telegram account.",
     "spam.riskTitle": "Ban risk",
@@ -286,6 +300,7 @@ const translations = {
     "settings.title": "Настройки",
     "settings.hint": "Подключение и управление аккаунтом.",
     "settings.general": "Основное",
+    "settings.limits": "Лимиты отправки",
     "settings.account": "Аккаунт",
     "settings.languageTitle": "Язык",
     "settings.languageHint": "Выберите язык интерфейса Mini App.",
@@ -297,6 +312,18 @@ const translations = {
     "settings.revokeTitle": "Telegram-сессия",
     "settings.revokeHint": "Удаляет доступ сервиса к аккаунту. После этого Telegram может снова запросить код.",
     "settings.revokeButton": "Отключить",
+    "limits.targetsLabel": "Чатов на пост",
+    "limits.targetsValue": "до 15",
+    "limits.accountIntervalLabel": "Пауза аккаунта",
+    "limits.accountIntervalValue": "30 сек",
+    "limits.repeatLabel": "Повтор поста",
+    "limits.repeatValue": "от 20 мин",
+    "limits.queueLabel": "Очередь в день",
+    "limits.queueValue": "300 задач",
+    "limits.postsLabel": "Активных постов",
+    "limits.postsValue": "до 50",
+    "limits.mediaLabel": "Медиа в посте",
+    "limits.mediaValue": "до 10",
     "admin.title": "Админка",
     "admin.hint": "Пользователи, ограничения и общая статистика отправок.",
     "admin.users": "Пользователи",
@@ -431,6 +458,7 @@ const translations = {
     "validation.chooseWeekday": "Выберите хотя бы один день недели.",
     "validation.postMissing": "Пост не найден. Обновите страницу.",
     "validation.phoneRequired": "Сначала введите номер телефона.",
+    "validation.phoneInvalid": "Введите корректный номер с кодом страны.",
     "spam.minInterval": "Минимальный интервал повтора — 20 минут.",
     "spam.riskMessage": "За частую отправку сообщений ваш аккаунт в Telegram может быть ограничен или заблокирован.",
     "spam.riskTitle": "Риск блокировки",
@@ -674,19 +702,44 @@ function updateSmsButtonFromLoginResult(result) {
   setBusy(button, true, t("login.smsUnavailable"));
 }
 
+function phoneDigits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatPhoneLocal(value) {
+  const digits = phoneDigits(value).slice(0, 15);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
+  if (digits.length <= 10) {
+    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)} ${digits.slice(10)}`;
+}
+
+function normalizePhoneInput(input) {
+  if (!input) return;
+  const formatted = formatPhoneLocal(input.value);
+  input.value = formatted;
+}
+
 function loginPhoneFromForm(form) {
   const countryCode = String(form.get("country_code") || "").replace(/[^\d+]/g, "");
-  const rawLocalPhone = String(form.get("phone_local") || "").trim();
+  const rawLocalPhone = String(form.get("phone_local") || "");
   const fullPhone = rawLocalPhone.replace(/[^\d+]/g, "");
   if (fullPhone.startsWith("+")) {
-    return fullPhone;
+    const normalized = `+${phoneDigits(fullPhone)}`;
+    return normalized.length > 1 ? normalized : "";
   }
 
-  const localPhone = rawLocalPhone.replace(/[^\d]/g, "");
+  const localPhone = phoneDigits(rawLocalPhone);
   if (!countryCode || !localPhone) {
     return "";
   }
   return `${countryCode}${localPhone}`;
+}
+
+function isValidPhone(phone) {
+  return /^\+\d{8,15}$/.test(String(phone || ""));
 }
 
 function selectedGroups() {
@@ -2116,11 +2169,23 @@ document.querySelector("#audit-next").addEventListener("click", () => {
   loadAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
 });
 
+document.querySelector("input[name=phone_local]").addEventListener("input", (event) => {
+  normalizePhoneInput(event.currentTarget);
+});
+
 document.querySelector("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   clearNotice();
   const form = new FormData(event.currentTarget);
   const phone = loginPhoneFromForm(form);
+  if (!phone) {
+    notify(t("validation.phoneRequired"), "error");
+    return;
+  }
+  if (!isValidPhone(phone)) {
+    notify(t("validation.phoneInvalid"), "error");
+    return;
+  }
   const button = document.querySelector("#send-code");
   setBusy(button, true, t("login.sending"));
 
@@ -2150,6 +2215,10 @@ document.querySelector("#resend-sms-code").addEventListener("click", async (even
   const phone = state.pendingPhone || loginPhoneFromForm(new FormData(document.querySelector("#login-form")));
   if (!phone) {
     notify(t("validation.phoneRequired"), "error");
+    return;
+  }
+  if (!isValidPhone(phone)) {
+    notify(t("validation.phoneInvalid"), "error");
     return;
   }
   setBusy(button, true, t("login.sending"));

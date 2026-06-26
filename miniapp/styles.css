@@ -340,6 +340,37 @@ button:disabled {
   line-height: 1.38;
 }
 
+.settings-limits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.settings-limit {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 11px 14px;
+  background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
+}
+
+.settings-limit span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.settings-limit strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
 .settings-control {
   display: flex;
   min-width: 136px;
@@ -632,22 +663,30 @@ textarea {
 
 .folder-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   margin: 0 0 10px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  overflow: hidden;
 }
 
 .folder-chip {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 8px 12px;
   background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
   color: var(--text);
   font-size: 13px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
 }
 
 .folder-chip.selected {
@@ -1520,6 +1559,10 @@ textarea {
 
   .settings-control > * {
     width: 100%;
+  }
+
+  .settings-limits-grid {
+    grid-template-columns: 1fr;
   }
 
   .status-panel {
