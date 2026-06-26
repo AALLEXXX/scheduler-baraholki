@@ -12,6 +12,8 @@ from telethon.errors import FloodWaitError
 from autopost_manager.config import Settings
 from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
+from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
+from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.send_errors import classify_send_error_info
 
 PROCESSING_TIMEOUT_SECONDS = 10 * 60
@@ -62,19 +64,13 @@ def choose_session(db: Session, job: PublishJob) -> TelegramSession | None:
     owner_id = job.post.created_by_telegram_id
     if owner_id is None:
         return None
-    return db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == owner_id)
-        .where(TelegramSession.status == SessionStatus.active)
-        .order_by(TelegramSession.last_send_at.asc().nullsfirst())
-        .limit(1)
-    ).first()
+    return TelegramSessionRepository(db).least_recently_used_active_for_owner(owner_id)
 
 
 def owner_settings(db: Session, owner_id: int | None) -> UserSettings | None:
     if owner_id is None:
         return None
-    return db.get(UserSettings, owner_id)
+    return UserSettingsRepository(db).fetch_by_user_id(owner_id)
 
 
 def sent_today(db: Session, owner_id: int | None) -> int:

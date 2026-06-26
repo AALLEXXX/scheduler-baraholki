@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.models import Post, PublishJob, SessionStatus, TargetChat, TelegramSession
+from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.schemas import AuditItemOut, AuditMessageOut, AuditPageOut
 from autopost_manager.telegram_client import TelegramMessageSnapshot
 
@@ -38,12 +39,7 @@ class AuditService:
     send_alert: SendAlert
 
     def active_account(self, telegram_user_id: int) -> TelegramSession | None:
-        return self.db.scalars(
-            select(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .where(TelegramSession.status == SessionStatus.active)
-            .order_by(TelegramSession.updated_at.desc())
-        ).first()
+        return TelegramSessionRepository(self.db).active_for_owner(telegram_user_id)
 
     def audit_page_for_user(
         self,

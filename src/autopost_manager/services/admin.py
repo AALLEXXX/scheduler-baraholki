@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.models import JobStatus, Post, PublishJob, TelegramSession, UserSettings
+from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
+from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.schemas import AdminStatsOut, AdminUserOut, AdminUserPageOut, AdminUserUpdate
 
 
@@ -51,13 +53,7 @@ class AdminService:
     db: Session
 
     def user_settings(self, telegram_user_id: int) -> UserSettings:
-        settings = self.db.get(UserSettings, telegram_user_id)
-        if settings:
-            return settings
-        settings = UserSettings(telegram_user_id=telegram_user_id)
-        self.db.add(settings)
-        self.db.flush()
-        return settings
+        return UserSettingsRepository(self.db).get_or_create(telegram_user_id)
 
     def cancel_user_pending_jobs(self, telegram_user_id: int) -> int:
         jobs = list(
@@ -73,12 +69,8 @@ class AdminService:
         return len(jobs)
 
     def admin_user_out(self, telegram_user_id: int) -> AdminUserOut:
-        session = self.db.scalars(
-            select(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .order_by(TelegramSession.updated_at.desc())
-        ).first()
-        settings = self.db.get(UserSettings, telegram_user_id)
+        session = TelegramSessionRepository(self.db).latest_for_owner(telegram_user_id)
+        settings = UserSettingsRepository(self.db).fetch_by_user_id(telegram_user_id)
         return AdminUserOut(
             telegram_user_id=telegram_user_id,
             username=session.username if session else None,
@@ -131,15 +123,14 @@ class AdminService:
         )
 
     def update_user(self, telegram_user_id: int, payload: AdminUserUpdate) -> AdminUserOut:
-        has_session = self.db.scalar(
-            select(func.count())
-            .select_from(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-        )
-        if not has_session and not self.db.get(UserSettings, telegram_user_id):
+        session_repository = TelegramSessionRepository(self.db)
+        settings_repository = UserSettingsRepository(self.db)
+        if not session_repository.count_for_owner(telegram_user_id) and not settings_repository.fetch_by_user_id(
+            telegram_user_id,
+        ):
             raise HTTPException(status_code=404, detail="User not found")
 
-        settings = self.user_settings(telegram_user_id)
+        settings = settings_repository.get_or_create(telegram_user_id)
         if payload.banned is not None:
             settings.banned = payload.banned
         if payload.autopost_paused is not None:
