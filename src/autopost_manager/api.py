@@ -31,7 +31,6 @@ from autopost_manager.config import get_settings
 from autopost_manager.db import get_db
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import (
-    JobStatus,
     Post,
     PostStatus,
     PublishJob,
@@ -66,7 +65,6 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     UserSettingsOut,
 )
-from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
@@ -79,6 +77,7 @@ from autopost_manager.services.admin import mask_phone as admin_mask_phone
 from autopost_manager.services.admin import sent_since as admin_sent_since
 from autopost_manager.services.audit import AuditService
 from autopost_manager.services.audit import telegram_message_link as audit_telegram_message_link
+from autopost_manager.services.account import AccountService
 from autopost_manager.services.chats import ChatService
 from autopost_manager.telegram_client import (
     confirm_login_code,
@@ -731,16 +730,14 @@ def get_user_settings(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> UserSettingsOut:
-    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
-    db.commit()
-    return UserSettingsOut(autopost_paused=settings.autopost_paused)
+    return AccountService(db).user_settings(telegram_user_id=telegram_user_id)
 
 
 def list_sessions(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TelegramSession]:
-    return TelegramSessionRepository(db).list_for_owner(telegram_user_id)
+    return AccountService(db).list_sessions(telegram_user_id=telegram_user_id)
 
 
 async def start_account_login(
@@ -895,28 +892,14 @@ async def confirm_account_password(
 
 
 def cancel_user_pending_jobs(*, telegram_user_id: int, db: Session) -> int:
-    jobs = list(
-        db.scalars(
-            select(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-            .where(PublishJob.status == JobStatus.pending)
-        )
-    )
-    for job in jobs:
-        job.status = JobStatus.cancelled
-    return len(jobs)
+    return PublishJobRepository(db).cancel_pending_for_owner(telegram_user_id)
 
 
 def pause_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountPauseOut:
-    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
-    settings.autopost_paused = True
-    cancelled = cancel_user_pending_jobs(telegram_user_id=telegram_user_id, db=db)
-    db.commit()
-    return AccountPauseOut(autopost_paused=True, cancelled_jobs=cancelled)
+    return AccountService(db).pause_autoposting(telegram_user_id=telegram_user_id)
 
 
 def logout_account(
@@ -930,47 +913,17 @@ def resume_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountPauseOut:
-    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
-    settings.autopost_paused = False
-    db.commit()
-    return AccountPauseOut(autopost_paused=False, cancelled_jobs=0)
+    return AccountService(db).resume_autoposting(telegram_user_id=telegram_user_id)
 
 
 async def revoke_account_session(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountRevokeOut:
-    sessions = TelegramSessionRepository(db).list_non_revoked_for_owner(telegram_user_id)
-    chats = TargetChatRepository(db).list_enabled_for_owner(telegram_user_id)
-
-    telegram_logout_errors: list[str] = []
-    for session in sessions:
-        try:
-            await logout_session_from_telegram(session)
-        except Exception as exc:
-            telegram_logout_errors.append(f"{session.id}: {exc}")
-        session.status = SessionStatus.revoked
-        session.phone_code_hash = None
-        session.session_string = None
-        delete_session_files(session.session_path)
-
-    for chat in chats:
-        chat.enabled = False
-
-    posts = list(db.scalars(select(Post).where(Post.created_by_telegram_id == telegram_user_id)).unique())
-    for post in posts:
-        if post.status == PostStatus.scheduled:
-            post.status = PostStatus.paused
-    cancelled = cancel_user_pending_jobs(telegram_user_id=telegram_user_id, db=db)
-    settings = user_settings(telegram_user_id=telegram_user_id, db=db)
-    settings.autopost_paused = True
-
-    db.commit()
-    return AccountRevokeOut(
-        revoked_sessions=len(sessions),
-        disabled_chats=len(chats),
-        cancelled_jobs=cancelled,
-        telegram_logout_errors=telegram_logout_errors,
+    return await AccountService(db).revoke_account(
+        telegram_user_id=telegram_user_id,
+        logout_session=logout_session_from_telegram,
+        delete_session_files=delete_session_files,
     )
 
 

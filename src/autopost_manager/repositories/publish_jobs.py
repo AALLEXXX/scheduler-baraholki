@@ -97,6 +97,19 @@ class PublishJobRepository:
             job.status = JobStatus.cancelled
         return len(jobs)
 
+    def cancel_pending_for_owner(self, owner_telegram_id: int) -> int:
+        jobs = list(
+            self.db.scalars(
+                select(PublishJob)
+                .join(Post, PublishJob.post_id == Post.id)
+                .where(Post.created_by_telegram_id == owner_telegram_id)
+                .where(PublishJob.status == JobStatus.pending)
+            )
+        )
+        for job in jobs:
+            job.status = JobStatus.cancelled
+        return len(jobs)
+
     def list_for_post(self, post_id: UUID) -> list[PublishJob]:
         return list(self.db.scalars(select(PublishJob).where(PublishJob.post_id == post_id)))
 

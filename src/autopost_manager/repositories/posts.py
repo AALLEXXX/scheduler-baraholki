@@ -43,6 +43,18 @@ class PostRepository:
             or 0
         )
 
+    def pause_scheduled_for_owner(self, owner_telegram_id: int) -> int:
+        posts = list(
+            self.db.scalars(
+                select(Post)
+                .where(Post.created_by_telegram_id == owner_telegram_id)
+                .where(Post.status == PostStatus.scheduled)
+            )
+        )
+        for post in posts:
+            post.status = PostStatus.paused
+        return len(posts)
+
     def replace_targets(self, post: Post, target_chat_ids: list[UUID]) -> None:
         post.targets.clear()
         self.db.flush()
