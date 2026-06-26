@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -15,8 +16,11 @@ from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.schedule import WeekdaySet
-from autopost_manager.schemas import PostCreate, PostMediaOut, PostOut, PostResumeUpdate, PostScheduleUpdate
+from autopost_manager.schemas import DeletePostOut, PostCreate, PostMediaOut, PostOut, PostResumeUpdate, PostScheduleUpdate
 from autopost_manager.services.admin import day_start, sent_since
+from autopost_manager.services.telegram_cleanup import BotMessageDeleteResult, collect_source_message_refs
+
+DeleteSourceMessages = Callable[..., Awaitable[BotMessageDeleteResult]]
 
 
 def as_aware(value: datetime) -> datetime:
@@ -203,6 +207,44 @@ class PostService:
             count += 1
         self.db.commit()
         return {"ok": True, "jobs_created": count}
+
+    async def delete_post(
+        self,
+        *,
+        post_id: UUID,
+        telegram_user_id: int,
+        delete_source_messages: DeleteSourceMessages,
+        ack_text: str,
+    ) -> DeletePostOut:
+        post = self._owned_post_or_404(post_id, telegram_user_id)
+        self._require_active_account(telegram_user_id)
+        self._require_autopost_enabled(telegram_user_id)
+
+        message_refs = collect_source_message_refs(post)
+        match_texts = {post.body}
+        created_at = post.created_at
+        media_count = len(post.media_items)
+        deleted_jobs = PublishJobRepository(self.db).delete_for_post(post.id)
+        PostRepository(self.db).delete(post)
+        self.db.commit()
+        telegram_delete = await delete_source_messages(
+            telegram_user_id=telegram_user_id,
+            refs=message_refs,
+            db=self.db,
+            match_texts=match_texts,
+            ack_text=ack_text,
+            created_at=created_at,
+            media_count=media_count,
+        )
+
+        return DeletePostOut(
+            ok=True,
+            deleted_jobs=deleted_jobs,
+            source_messages_found=len(message_refs),
+            telegram_delete_attempted=telegram_delete.attempted,
+            deleted_bot_messages=telegram_delete.deleted,
+            telegram_delete_errors=telegram_delete.errors,
+        )
 
     def _owned_post_or_404(self, post_id: UUID, telegram_user_id: int) -> Post:
         post = PostRepository(self.db).fetch_owned(post_id, telegram_user_id)

@@ -727,36 +727,11 @@ async def delete_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> DeletePostOut:
-    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    require_active_account(telegram_user_id=telegram_user_id, db=db)
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-
-    message_refs = collect_source_message_refs(post)
-    match_texts = {post.body}
-    created_at = post.created_at
-    media_count = len(post.media_items)
-    deleted_jobs = PublishJobRepository(db).delete_for_post(post.id)
-    PostRepository(db).delete(post)
-    db.commit()
-    telegram_delete = await delete_source_messages(
+    return await PostService(db=db, settings=get_settings()).delete_post(
+        post_id=post_id,
         telegram_user_id=telegram_user_id,
-        refs=message_refs,
-        db=db,
-        match_texts=match_texts,
+        delete_source_messages=delete_source_messages,
         ack_text=POST_SAVED_ACK_TEXT,
-        created_at=created_at,
-        media_count=media_count,
-    )
-
-    return DeletePostOut(
-        ok=True,
-        deleted_jobs=deleted_jobs,
-        source_messages_found=len(message_refs),
-        telegram_delete_attempted=telegram_delete.attempted,
-        deleted_bot_messages=telegram_delete.deleted,
-        telegram_delete_errors=telegram_delete.errors,
     )
 
 
