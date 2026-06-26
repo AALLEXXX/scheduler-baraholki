@@ -19,7 +19,10 @@ add_dual_route(
 add_dual_route(
     router,
     "/api/sessions/{session_id}/sync-chats",
-    "/rpc/autopost/sessions/{session_id}/sync-chats",
+    (
+        "/rpc/autopost/sync-target-chats/{session_id}",
+        "/rpc/autopost/sessions/{session_id}/sync-chats",
+    ),
     handlers.sync_session_chats,
     methods=["POST"],
 )

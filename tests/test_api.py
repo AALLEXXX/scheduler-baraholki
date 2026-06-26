@@ -76,7 +76,7 @@ def test_rest_and_rpc_routes_are_available(client, auth_user, db_session) -> Non
     assert response.status_code == 200, response.text
     post_id = response.json()["id"]
 
-    pause = client.patch(f"/rpc/autopost/posts/{post_id}/pause")
+    pause = client.patch(f"/rpc/autopost/pause-post/{post_id}")
     assert pause.status_code == 200, pause.text
 
 
