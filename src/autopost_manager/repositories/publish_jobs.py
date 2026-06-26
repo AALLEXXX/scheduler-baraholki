@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from uuid import UUID
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from autopost_manager.models import JobStatus, Post, PublishJob, UserSettings
@@ -83,3 +84,61 @@ class PublishJobRepository:
         job.last_error = error
         job.locked_until = None
         job.next_attempt_at = next_attempt_at
+
+    def cancel_pending_for_post(self, post_id: UUID) -> int:
+        jobs = list(
+            self.db.scalars(
+                select(PublishJob)
+                .where(PublishJob.post_id == post_id)
+                .where(PublishJob.status == JobStatus.pending)
+            )
+        )
+        for job in jobs:
+            job.status = JobStatus.cancelled
+        return len(jobs)
+
+    def list_for_post(self, post_id: UUID) -> list[PublishJob]:
+        return list(self.db.scalars(select(PublishJob).where(PublishJob.post_id == post_id)))
+
+    def delete_for_post(self, post_id: UUID) -> int:
+        jobs = self.list_for_post(post_id)
+        for job in jobs:
+            self.db.delete(job)
+        return len(jobs)
+
+    def active_for_post_target(self, *, post_id: UUID, target_chat_id: UUID) -> PublishJob | None:
+        return self.db.scalars(
+            select(PublishJob)
+            .where(PublishJob.post_id == post_id)
+            .where(PublishJob.target_chat_id == target_chat_id)
+            .where(PublishJob.status.in_([JobStatus.pending, JobStatus.processing]))
+        ).first()
+
+    def add_pending(
+        self,
+        *,
+        post_id: UUID,
+        target_chat_id: UUID,
+        session_id: UUID | None,
+        due_at: datetime,
+    ) -> PublishJob:
+        job = PublishJob(
+            post_id=post_id,
+            target_chat_id=target_chat_id,
+            session_id=session_id,
+            due_at=due_at,
+        )
+        self.db.add(job)
+        return job
+
+    def count_created_since_for_owner(self, *, owner_telegram_id: int, since: datetime) -> int:
+        return int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(PublishJob)
+                .join(Post, PublishJob.post_id == Post.id)
+                .where(Post.created_by_telegram_id == owner_telegram_id)
+                .where(PublishJob.created_at >= since)
+            )
+            or 0
+        )

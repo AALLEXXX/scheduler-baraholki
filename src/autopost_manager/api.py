@@ -34,7 +34,6 @@ from autopost_manager.models import (
     JobStatus,
     Post,
     PostStatus,
-    PostTarget,
     PublishJob,
     RateLimitEvent,
     ScheduleKind,
@@ -70,6 +69,8 @@ from autopost_manager.schemas import (
 )
 from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
+from autopost_manager.repositories.posts import PostRepository
+from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.schedule import WeekdaySet
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.services.admin import AdminService
@@ -310,16 +311,7 @@ def schedule_weekdays_for_storage(
 
 
 def cancel_pending_jobs(post: Post, db: Session) -> int:
-    jobs = list(
-        db.scalars(
-            select(PublishJob)
-            .where(PublishJob.post_id == post.id)
-            .where(PublishJob.status == JobStatus.pending)
-        )
-    )
-    for job in jobs:
-        job.status = JobStatus.cancelled
-    return len(jobs)
+    return PublishJobRepository(db).cancel_pending_for_post(post.id)
 
 
 def active_account(
@@ -497,15 +489,7 @@ def require_autopost_enabled(
 
 
 def active_scheduled_posts_count(db: Session, telegram_user_id: int) -> int:
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(Post)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-            .where(Post.status == PostStatus.scheduled)
-        )
-        or 0
-    )
+    return PostRepository(db).count_active_scheduled_for_owner(telegram_user_id)
 
 
 def user_sessions_count(db: Session, telegram_user_id: int) -> int:
@@ -536,15 +520,9 @@ def enforce_active_post_limit(
 
 def enforce_daily_job_creation_limit(db: Session, telegram_user_id: int, jobs_to_create: int) -> None:
     settings = get_settings()
-    today_jobs = int(
-        db.scalar(
-            select(func.count())
-            .select_from(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-            .where(PublishJob.created_at >= day_start())
-        )
-        or 0
+    today_jobs = PublishJobRepository(db).count_created_since_for_owner(
+        owner_telegram_id=telegram_user_id,
+        since=day_start(),
     )
     if today_jobs + jobs_to_create > settings.max_jobs_per_user_per_day:
         raise HTTPException(status_code=429, detail="Достигнут дневной лимит постановки задач в очередь")
@@ -1112,15 +1090,7 @@ def list_posts(
     if not active_account(telegram_user_id=telegram_user_id, db=db):
         return []
 
-    posts = (
-        db.scalars(
-            select(Post)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-            .order_by(Post.created_at.desc())
-        )
-        .unique()
-        .all()
-    )
+    posts = PostRepository(db).list_for_owner(telegram_user_id)
     return [post_to_out(post) for post in posts]
 
 
@@ -1159,8 +1129,7 @@ def create_post(
     post = Post(**post_data, created_by_telegram_id=telegram_user_id)
     db.add(post)
     db.flush()
-    for target_chat_id in payload.target_chat_ids:
-        db.add(PostTarget(post_id=post.id, target_chat_id=target_chat_id))
+    PostRepository(db).replace_targets(post, payload.target_chat_ids)
     db.commit()
     db.refresh(post)
     return post_to_out(post)
@@ -1172,8 +1141,8 @@ def schedule_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = db.get(Post, post_id)
-    if not post or post.created_by_telegram_id != telegram_user_id:
+    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
@@ -1208,10 +1177,7 @@ def schedule_post(
     post.timezone = payload.timezone
     post.default_session_id = payload.default_session_id
     cancel_pending_jobs(post, db)
-    post.targets.clear()
-    db.flush()
-    for target_chat_id in payload.target_chat_ids:
-        db.add(PostTarget(post_id=post.id, target_chat_id=target_chat_id))
+    PostRepository(db).replace_targets(post, payload.target_chat_ids)
     db.commit()
     db.refresh(post)
     return post_to_out(post)
@@ -1222,8 +1188,8 @@ def pause_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = db.get(Post, post_id)
-    if not post or post.created_by_telegram_id != telegram_user_id:
+    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
@@ -1243,8 +1209,8 @@ def resume_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = db.get(Post, post_id)
-    if not post or post.created_by_telegram_id != telegram_user_id:
+    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
@@ -1267,8 +1233,8 @@ async def delete_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> DeletePostOut:
-    post = db.get(Post, post_id)
-    if not post or post.created_by_telegram_id != telegram_user_id:
+    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
@@ -1277,10 +1243,8 @@ async def delete_post(
     match_texts = {post.body}
     created_at = post.created_at
     media_count = len(post.media_items)
-    jobs = list(db.scalars(select(PublishJob).where(PublishJob.post_id == post.id)))
-    for job in jobs:
-        db.delete(job)
-    db.delete(post)
+    deleted_jobs = PublishJobRepository(db).delete_for_post(post.id)
+    PostRepository(db).delete(post)
     db.commit()
     telegram_delete = await delete_source_messages(
         telegram_user_id=telegram_user_id,
@@ -1294,7 +1258,7 @@ async def delete_post(
 
     return DeletePostOut(
         ok=True,
-        deleted_jobs=len(jobs),
+        deleted_jobs=deleted_jobs,
         source_messages_found=len(message_refs),
         telegram_delete_attempted=telegram_delete.attempted,
         deleted_bot_messages=telegram_delete.deleted,
@@ -1307,8 +1271,8 @@ def enqueue_now(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    post = db.get(Post, post_id)
-    if not post or post.created_by_telegram_id != telegram_user_id:
+    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     require_active_account(telegram_user_id=telegram_user_id, db=db)
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
@@ -1320,22 +1284,15 @@ def enqueue_now(
     enforce_daily_job_creation_limit(db, telegram_user_id, len(post.targets))
 
     count = 0
+    publish_jobs = PublishJobRepository(db)
     for target in post.targets:
-        existing = db.scalars(
-            select(PublishJob)
-            .where(PublishJob.post_id == post.id)
-            .where(PublishJob.target_chat_id == target.target_chat_id)
-            .where(PublishJob.status.in_([JobStatus.pending, JobStatus.processing]))
-        ).first()
-        if existing:
+        if publish_jobs.active_for_post_target(post_id=post.id, target_chat_id=target.target_chat_id):
             continue
-        db.add(
-            PublishJob(
-                post_id=post.id,
-                target_chat_id=target.target_chat_id,
-                session_id=post.default_session_id,
-                due_at=post.next_run_at or post.created_at,
-            )
+        publish_jobs.add_pending(
+            post_id=post.id,
+            target_chat_id=target.target_chat_id,
+            session_id=post.default_session_id,
+            due_at=post.next_run_at or post.created_at,
         )
         count += 1
     db.commit()
