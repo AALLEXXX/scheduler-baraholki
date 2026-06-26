@@ -1437,6 +1437,70 @@ def test_audit_requires_active_account(client, auth_user, db_session) -> None:
     assert response.json() == {"items": [], "page": 1, "page_size": 20, "total": 0}
 
 
+def test_admin_can_view_user_audit(client, auth_user, db_session, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "999")
+    target_session = make_session(db_session, owner_id=111, username="alice")
+    target_chat = make_chat(db_session, target_session, title="Alice Group", telegram_chat_id=-1009876543210)
+    target_post = make_post(db_session, owner_id=111, session=target_session, chats=[target_chat], body="Alice body")
+    target_job = make_job(db_session, target_post, target_chat, session=target_session, status=JobStatus.done)
+    target_job.telegram_message_id = 45
+
+    other_session = make_session(db_session, owner_id=222)
+    other_chat = make_chat(db_session, other_session, title="Other Group")
+    other_post = make_post(db_session, owner_id=222, session=other_session, chats=[other_chat])
+    make_job(db_session, other_post, other_chat, session=other_session, status=JobStatus.done)
+    db_session.commit()
+
+    auth_user(999)
+    response = client.get("/api/admin/users/111/audit", params={"page": 1, "page_size": 20})
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == str(target_job.id)
+    assert data["items"][0]["post_preview"] == "Alice body"
+    assert data["items"][0]["target_chat_title"] == "Alice Group"
+    assert data["items"][0]["message_link"] == "https://t.me/c/9876543210/45"
+
+
+def test_admin_can_view_user_audit_message(client, auth_user, db_session, monkeypatch) -> None:
+    monkeypatch.setattr(api_module.get_settings(), "admin_telegram_ids", "999")
+    target_session = make_session(db_session, owner_id=111, username="alice")
+    target_chat = make_chat(db_session, target_session, title="Alice Group", telegram_chat_id=-1009876543210)
+    target_post = make_post(db_session, owner_id=111, session=target_session, chats=[target_chat], body="Alice body")
+    target_job = make_job(db_session, target_post, target_chat, session=target_session, status=JobStatus.done)
+    target_job.telegram_message_id = 45
+    db_session.commit()
+
+    async def fake_get_message_from_session(*, session, peer, message_id):
+        assert session.owner_telegram_id == 111
+        assert peer == -1009876543210
+        assert message_id == 45
+        return SimpleNamespace(text="Alice delivered message", has_media=False, date=None)
+
+    monkeypatch.setattr(api_module, "get_message_from_session", fake_get_message_from_session)
+
+    auth_user(999)
+    response = client.get(f"/api/admin/users/111/audit/{target_job.id}/message")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["message_text"] == "Alice delivered message"
+
+
+def test_admin_user_audit_requires_admin(client, auth_user, db_session) -> None:
+    target_session = make_session(db_session, owner_id=111)
+    target_chat = make_chat(db_session, target_session)
+    target_post = make_post(db_session, owner_id=111, session=target_session, chats=[target_chat])
+    make_job(db_session, target_post, target_chat, session=target_session, status=JobStatus.done)
+    db_session.commit()
+
+    auth_user(222)
+    response = client.get("/api/admin/users/111/audit")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
 def test_admin_endpoints_require_configured_admin(client, auth_user, db_session) -> None:
     auth_user(111)
     make_session(db_session, owner_id=111, username="regular")

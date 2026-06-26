@@ -1378,6 +1378,10 @@ def list_audit(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AuditPageOut:
+    return audit_page_for_user(db, telegram_user_id=telegram_user_id, page=page, page_size=page_size)
+
+
+def audit_page_for_user(db: Session, *, telegram_user_id: int, page: int, page_size: int) -> AuditPageOut:
     if not active_account(telegram_user_id=telegram_user_id, db=db):
         return AuditPageOut(items=[], page=page, page_size=page_size, total=0)
 
@@ -1431,6 +1435,10 @@ async def get_audit_message(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AuditMessageOut:
+    return await audit_message_for_user(db, telegram_user_id=telegram_user_id, job_id=job_id)
+
+
+async def audit_message_for_user(db: Session, *, telegram_user_id: int, job_id: uuid.UUID) -> AuditMessageOut:
     row = db.execute(
         select(PublishJob, Post, TargetChat)
         .join(Post, PublishJob.post_id == Post.id)
@@ -1471,6 +1479,27 @@ async def get_audit_message(
         message_text=message.text,
         message_link=telegram_message_link(chat, job.telegram_message_id),
     )
+
+
+@app.get("/api/admin/users/{telegram_user_id}/audit", response_model=AuditPageOut)
+def admin_list_user_audit(
+    telegram_user_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+    _admin_id: int = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AuditPageOut:
+    return audit_page_for_user(db, telegram_user_id=telegram_user_id, page=page, page_size=page_size)
+
+
+@app.get("/api/admin/users/{telegram_user_id}/audit/{job_id}/message", response_model=AuditMessageOut)
+async def admin_get_user_audit_message(
+    telegram_user_id: int,
+    job_id: uuid.UUID,
+    _admin_id: int = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AuditMessageOut:
+    return await audit_message_for_user(db, telegram_user_id=telegram_user_id, job_id=job_id)
 
 
 def admin_user_out(db: Session, telegram_user_id: int) -> AdminUserOut:

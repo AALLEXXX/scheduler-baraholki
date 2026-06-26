@@ -87,6 +87,11 @@ const translations = {
     "admin.hint": "Users, limits, and global delivery statistics.",
     "admin.users": "Users",
     "admin.stats": "Stats",
+    "admin.audit": "Audit",
+    "admin.openAudit": "Audit",
+    "admin.backToUsers": "Back to users",
+    "admin.auditTitle": "User audit",
+    "admin.auditHint": "Delivery history visible to this user.",
     "admin.search": "Search username, phone, or ID",
     "edit.eyebrow": "Editing",
     "edit.title": "Scheduled post",
@@ -328,6 +333,11 @@ const translations = {
     "admin.hint": "Пользователи, ограничения и общая статистика отправок.",
     "admin.users": "Пользователи",
     "admin.stats": "Статистика",
+    "admin.audit": "Аудит",
+    "admin.openAudit": "Аудит",
+    "admin.backToUsers": "К пользователям",
+    "admin.auditTitle": "Аудит пользователя",
+    "admin.auditHint": "История отправок, которую видит этот пользователь.",
     "admin.search": "Поиск по username, телефону или ID",
     "edit.eyebrow": "Редактирование",
     "edit.title": "Запланированный пост",
@@ -506,6 +516,8 @@ const state = {
   auditLoading: false,
   adminTab: "users",
   adminUsers: { items: [], page: 1, page_size: 10, total: 0 },
+  adminAudit: { user: null, items: [], page: 1, page_size: 20, total: 0 },
+  adminAuditLoading: false,
   adminStats: null,
   adminLoading: false,
   adminUserSearch: "",
@@ -1265,10 +1277,10 @@ function renderAudit() {
     return;
   }
 
-  list.replaceChildren(...state.audit.items.map(renderAuditItem));
+  list.replaceChildren(...state.audit.items.map((item) => renderAuditItem(item)));
 }
 
-function renderAuditItem(item) {
+function renderAuditItem(item, options = {}) {
   const node = document.createElement("article");
   node.className = `audit-item ${item.status}`.trim();
   const title = shortWords(item.post_title || item.post_preview || t("draft.defaultTitle"), 9);
@@ -1309,16 +1321,19 @@ function renderAuditItem(item) {
     const button = node.querySelector('[data-action="view-message"]');
     actions.hidden = false;
     button.addEventListener("click", () => {
-      loadAuditMessage(item, button).catch((error) => notify(error.message, "error"));
+      loadAuditMessage(item, button, options).catch((error) => notify(error.message, "error"));
     });
   }
   return node;
 }
 
-async function loadAuditMessage(item, button) {
+async function loadAuditMessage(item, button, options = {}) {
   setBusy(button, true, t("audit.loadingMessage"));
   try {
-    const message = await api(`audit/${item.id}/message`);
+    const endpoint = options.adminUserId
+      ? `admin/users/${options.adminUserId}/audit/${item.id}/message`
+      : `audit/${item.id}/message`;
+    const message = await api(endpoint);
     showAuditMessage(message);
   } finally {
     setBusy(button, false, t("audit.viewMessage"));
@@ -1352,17 +1367,24 @@ function adminStatusSummary(user) {
   return user.session_status || t("admin.status.noSession");
 }
 
+function adminUserLabel(user) {
+  if (!user) return t("admin.userFallback");
+  return user.username ? `@${user.username}` : `${t("admin.userFallback")} ${user.telegram_user_id}`;
+}
+
 function renderAdmin() {
   const adminPanel = document.querySelector('[data-tab-panel="admin"]');
   if (!adminPanel || !isAdmin()) return;
   if (
     !document.querySelector("#admin-tabs") ||
     !document.querySelector("#admin-users") ||
-    !document.querySelector("#admin-stats")
+    !document.querySelector("#admin-stats") ||
+    !document.querySelector("#admin-audit")
   ) {
     return;
   }
 
+  document.querySelector("#admin-tabs").hidden = state.adminTab === "audit";
   document.querySelectorAll(".admin-tab-button").forEach((button) => {
     button.classList.toggle("selected", button.dataset.adminTab === state.adminTab);
   });
@@ -1372,6 +1394,7 @@ function renderAdmin() {
 
   renderAdminUsers();
   renderAdminStats();
+  renderAdminAudit();
 }
 
 function renderAdminUsers() {
@@ -1397,6 +1420,35 @@ function renderAdminUsers() {
   document.querySelector("#admin-users-next").disabled = state.adminUsers.page >= pages;
 }
 
+function renderAdminAudit() {
+  const list = document.querySelector("#admin-audit-list");
+  const pagination = document.querySelector("#admin-audit-pagination");
+  const title = document.querySelector("#admin-audit-title");
+  const count = document.querySelector("#admin-audit-count");
+  if (!list || !pagination || !title || !count) return;
+
+  const user = state.adminAudit.user;
+  title.textContent = user ? `${t("admin.auditTitle")}: ${adminUserLabel(user)}` : t("admin.auditTitle");
+  const total = state.adminAudit.total || 0;
+  count.textContent = state.adminAuditLoading ? t("loading.short") : countText("count.records", total);
+
+  if (state.adminAuditLoading && state.adminTab === "audit") {
+    list.replaceChildren(loadingBlock(t("audit.loading")));
+  } else if (!state.adminAudit.items.length) {
+    list.replaceChildren(emptyPost(t("empty.noAudit")));
+  } else {
+    list.replaceChildren(
+      ...state.adminAudit.items.map((item) => renderAuditItem(item, { adminUserId: user?.telegram_user_id })),
+    );
+  }
+
+  const pages = pageCount(total, state.adminAudit.page_size);
+  pagination.hidden = total <= state.adminAudit.page_size;
+  document.querySelector("#admin-audit-page").textContent = `${state.adminAudit.page} / ${pages}`;
+  document.querySelector("#admin-audit-prev").disabled = state.adminAudit.page <= 1;
+  document.querySelector("#admin-audit-next").disabled = state.adminAudit.page >= pages;
+}
+
 function renderAdminUser(user) {
   const node = document.createElement("article");
   node.className = `admin-user ${user.banned ? "banned" : user.autopost_paused ? "paused" : ""}`.trim();
@@ -1414,6 +1466,7 @@ function renderAdminUser(user) {
       </dl>
     </div>
     <div class="admin-user-controls">
+      <button class="secondary-button compact-button" type="button" data-action="audit">${t("admin.openAudit")}</button>
       <button class="danger-button compact-button" type="button" data-action="ban"></button>
       <button class="secondary-button compact-button" type="button" data-action="pause"></button>
       <label>
@@ -1423,9 +1476,7 @@ function renderAdminUser(user) {
       <button class="compact-button" type="button" data-action="limit">${t("admin.saveLimit")}</button>
     </div>
   `;
-  node.querySelector('[data-field="title"]').textContent = user.username
-    ? `@${user.username}`
-    : `${t("admin.userFallback")} ${user.telegram_user_id}`;
+  node.querySelector('[data-field="title"]').textContent = adminUserLabel(user);
   node.querySelector('[data-field="status"]').textContent = adminStatusSummary(user);
   node.querySelector('[data-field="id"]').textContent = String(user.telegram_user_id);
   node.querySelector('[data-field="phone"]').textContent = user.phone || "—";
@@ -1435,6 +1486,9 @@ function renderAdminUser(user) {
   limitInput.value = user.daily_send_limit ?? "";
   node.querySelector('[data-action="ban"]').textContent = user.banned ? t("admin.unban") : t("admin.ban");
   node.querySelector('[data-action="pause"]').textContent = user.autopost_paused ? t("admin.resume") : t("admin.pause");
+  node.querySelector('[data-action="audit"]').addEventListener("click", () => {
+    openAdminAudit(user);
+  });
   node.querySelector('[data-action="ban"]').addEventListener("click", () => {
     updateAdminUser(user.telegram_user_id, { banned: !user.banned }).catch((error) => notify(error.message, "error"));
   });
@@ -1886,7 +1940,45 @@ async function loadAdminStats(options = {}) {
   }
 }
 
+function openAdminAudit(user) {
+  state.adminTab = "audit";
+  state.adminAudit = {
+    user,
+    items: [],
+    page: 1,
+    page_size: state.adminAudit.page_size || 20,
+    total: 0,
+  };
+  loadAdminAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+}
+
+function closeAdminAudit() {
+  state.adminTab = "users";
+  state.adminAudit = { ...state.adminAudit, user: null, items: [], page: 1, total: 0 };
+  render();
+}
+
+async function loadAdminAudit(options = {}) {
+  if (!isAdmin() || !state.adminAudit.user) return;
+  state.adminAuditLoading = true;
+  if (options.renderFirst) render();
+  try {
+    const telegramUserId = state.adminAudit.user.telegram_user_id;
+    const page = await api(
+      `admin/users/${telegramUserId}/audit?page=${state.adminAudit.page}&page_size=${state.adminAudit.page_size}`,
+    );
+    state.adminAudit = { ...state.adminAudit, ...page };
+  } finally {
+    state.adminAuditLoading = false;
+    render();
+  }
+}
+
 async function loadAdminDashboard(options = {}) {
+  if (state.adminTab === "audit") {
+    await loadAdminAudit(options);
+    return;
+  }
   if (state.adminTab === "stats") {
     await loadAdminStats(options);
     return;
@@ -2021,6 +2113,8 @@ document.querySelectorAll(".admin-tab-button").forEach((button) => {
   });
 });
 
+document.querySelector("#admin-audit-back").addEventListener("click", closeAdminAudit);
+
 document.querySelector("#language-select").addEventListener("change", (event) => {
   setLanguage(event.target.value);
 });
@@ -2127,6 +2221,16 @@ document.querySelector("#admin-users-prev").addEventListener("click", () => {
 document.querySelector("#admin-users-next").addEventListener("click", () => {
   state.adminUsers.page += 1;
   loadAdminUsers({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#admin-audit-prev").addEventListener("click", () => {
+  state.adminAudit.page -= 1;
+  loadAdminAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
+});
+
+document.querySelector("#admin-audit-next").addEventListener("click", () => {
+  state.adminAudit.page += 1;
+  loadAdminAudit({ renderFirst: true }).catch((error) => notify(error.message, "error"));
 });
 
 document.querySelector("#edit-close").addEventListener("click", closeEditPost);

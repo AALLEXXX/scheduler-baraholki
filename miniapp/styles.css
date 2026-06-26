@@ -1114,6 +1114,36 @@ textarea {
   grid-column: span 2;
 }
 
+.admin-audit-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.admin-audit-heading h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.admin-audit-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.admin-audit-heading span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .admin-stats-grid {
   display: grid;
   grid-template-columns: 1.25fr 0.85fr;
@@ -1614,6 +1644,15 @@ textarea {
 
   .admin-user-controls label {
     grid-column: auto;
+  }
+
+  .admin-audit-heading {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .admin-audit-heading span {
+    white-space: normal;
   }
 
   .admin-stat-hero dl {

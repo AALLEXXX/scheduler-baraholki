@@ -330,7 +330,7 @@ def test_miniapp_has_audit_tab_with_top_pagination() -> None:
     assert "audit.viewMessage" in js
     assert "function loadAuditMessage" in js
     assert "function showAuditMessage" in js
-    assert 'api(`audit/${item.id}/message`)' in js
+    assert '`audit/${item.id}/message`' in js
     assert "item.message_link" in js
     assert "audit.messageId" not in js
     assert ".tab-bar" in css
@@ -408,6 +408,15 @@ def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
         "admin-user-list",
         "admin-users-pagination",
         "admin-stats-grid",
+        "admin-audit",
+        "admin-audit-back",
+        "admin-audit-title",
+        "admin-audit-count",
+        "admin-audit-pagination",
+        "admin-audit-list",
+        "admin-audit-prev",
+        "admin-audit-next",
+        "admin-audit-page",
     ]:
         assert f'id="{element_id}"' in html
         assert f"#{element_id}" in js
@@ -422,10 +431,17 @@ def test_miniapp_has_admin_tabs_for_users_and_stats() -> None:
     assert 'api(`admin/users?page=${state.adminUsers.page}' in js
     assert 'api("admin/stats")' in js
     assert 'api(`admin/users/${telegramUserId}`' in js
+    assert 'admin/users/${telegramUserId}/audit?page=${state.adminAudit.page}' in js
+    assert 'admin/users/${options.adminUserId}/audit/${item.id}/message' in js
+    assert 'data-action="audit"' in js
+    assert "function openAdminAudit" in js
+    assert "function renderAdminAudit" in js
     assert "daily_send_limit" in js
     assert "admin.ban" in js
+    assert "admin.openAudit" in js
     assert "admin.pause" in js
     assert ".admin-list" in css
+    assert ".admin-audit-heading" in css
     assert ".admin-stats-grid" in css
     assert ".admin-stat-hero" in css
     assert ".stat-ring" in css
