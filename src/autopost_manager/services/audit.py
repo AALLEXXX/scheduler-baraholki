@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+import logging
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from autopost_manager.models import Post, PublishJob, SessionStatus, TargetChat, TelegramSession
+from autopost_manager.schemas import AuditItemOut, AuditMessageOut, AuditPageOut
+from autopost_manager.telegram_client import TelegramMessageSnapshot
+
+logger = logging.getLogger(__name__)
+
+FetchMessage = Callable[..., Awaitable[TelegramMessageSnapshot | None]]
+SendAlert = Callable[..., Awaitable[None]]
+
+
+def telegram_message_link(chat: TargetChat, message_id: int | None) -> str | None:
+    if not message_id:
+        return None
+    if chat.username:
+        return f"https://t.me/{chat.username}/{message_id}"
+    chat_id = int(chat.telegram_chat_id)
+    chat_id_text = str(abs(chat_id))
+    if chat_id_text.startswith("100") and len(chat_id_text) > 3:
+        return f"https://t.me/c/{chat_id_text[3:]}/{message_id}"
+    return None
+
+
+@dataclass(slots=True)
+class AuditService:
+    db: Session
+    fetch_message: FetchMessage
+    send_alert: SendAlert
+
+    def active_account(self, telegram_user_id: int) -> TelegramSession | None:
+        return self.db.scalars(
+            select(TelegramSession)
+            .where(TelegramSession.owner_telegram_id == telegram_user_id)
+            .where(TelegramSession.status == SessionStatus.active)
+            .order_by(TelegramSession.updated_at.desc())
+        ).first()
+
+    def audit_page_for_user(
+        self,
+        *,
+        telegram_user_id: int,
+        page: int,
+        page_size: int,
+    ) -> AuditPageOut:
+        if not self.active_account(telegram_user_id):
+            return AuditPageOut(items=[], page=page, page_size=page_size, total=0)
+
+        base_query = (
+            select(PublishJob, Post, TargetChat)
+            .join(Post, PublishJob.post_id == Post.id)
+            .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+        )
+        total = self.db.scalar(
+            select(func.count())
+            .select_from(PublishJob)
+            .join(Post, PublishJob.post_id == Post.id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+        )
+        rows = self.db.execute(
+            base_query.order_by(PublishJob.updated_at.desc(), PublishJob.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+
+        return AuditPageOut(
+            items=[
+                AuditItemOut(
+                    id=job.id,
+                    post_id=post.id,
+                    post_title=post.title,
+                    post_preview=post.body,
+                    media_count=len(post.media_items),
+                    target_chat_id=chat.id,
+                    target_chat_title=chat.title,
+                    due_at=job.due_at,
+                    updated_at=job.updated_at,
+                    status=job.status,
+                    attempts=job.attempts,
+                    telegram_message_id=job.telegram_message_id,
+                    message_link=telegram_message_link(chat, job.telegram_message_id),
+                    last_error=job.last_error,
+                )
+                for job, post, chat in rows
+            ],
+            page=page,
+            page_size=page_size,
+            total=total or 0,
+        )
+
+    async def audit_message_for_user(
+        self,
+        *,
+        telegram_user_id: int,
+        job_id: uuid.UUID,
+    ) -> AuditMessageOut:
+        row = self.db.execute(
+            select(PublishJob, Post, TargetChat)
+            .join(Post, PublishJob.post_id == Post.id)
+            .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
+            .where(PublishJob.id == job_id)
+            .where(Post.created_by_telegram_id == telegram_user_id)
+        ).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Audit item not found")
+
+        job, _post, chat = row
+        if not job.telegram_message_id:
+            raise HTTPException(status_code=404, detail="Telegram message id is not available")
+
+        session = job.session
+        if not session or session.owner_telegram_id != telegram_user_id or session.status != SessionStatus.active:
+            session = self.active_account(telegram_user_id)
+        if not session:
+            raise HTTPException(status_code=409, detail="Connect Telegram account to view this message")
+
+        try:
+            message = await self.fetch_message(
+                session=session,
+                peer=chat.telegram_chat_id,
+                message_id=job.telegram_message_id,
+            )
+        except RuntimeError as exc:
+            logger.warning("Telegram audit message lookup failed: job_id=%s error=%s", job.id, exc)
+            await self.send_alert(
+                title="Audit message lookup error",
+                status="409",
+                fields={
+                    "action": "view_audit_message",
+                    "owner_telegram_id": telegram_user_id,
+                    "job_id": job.id,
+                    "target_telegram_chat_id": chat.telegram_chat_id,
+                    "target_title": chat.title,
+                    "telegram_message_id": job.telegram_message_id,
+                    "error_type": type(exc).__name__,
+                    "error": exc,
+                },
+            )
+            raise HTTPException(status_code=409, detail="Не удалось получить сообщение из Telegram") from exc
+
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found in Telegram chat")
+
+        return AuditMessageOut(
+            id=job.id,
+            target_chat_title=chat.title,
+            telegram_message_id=job.telegram_message_id,
+            message_text=message.text,
+            message_link=telegram_message_link(chat, job.telegram_message_id),
+        )
