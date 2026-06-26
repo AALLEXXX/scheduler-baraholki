@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from autopost_manager import scheduler
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
@@ -11,6 +14,24 @@ from conftest import make_chat, make_post, make_session
 
 def as_aware(value):
     return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def test_publish_job_has_idempotency_constraint(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    due_at = datetime.now(UTC).replace(microsecond=0)
+    db_session.commit()
+
+    db_session.add_all(
+        [
+            PublishJob(post_id=post.id, target_chat_id=chat.id, session_id=session.id, due_at=due_at),
+            PublishJob(post_id=post.id, target_chat_id=chat.id, session_id=session.id, due_at=due_at),
+        ]
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
 
 
 def test_enqueue_due_once_post_creates_jobs_for_all_targets_and_archives(db_session) -> None:

@@ -205,6 +205,9 @@ class PostMedia(Base):
 
 class PublishJob(Base):
     __tablename__ = "publish_jobs"
+    __table_args__ = (
+        UniqueConstraint("post_id", "target_chat_id", "due_at", name="uq_publish_jobs_post_target_due_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("posts.id"))
