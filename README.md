@@ -194,7 +194,7 @@ docker compose run --rm worker autopost-login-session "Main Account" "+100000000
 | `APP_BASE_URL` | Базовый URL backend | `http://localhost:8000` |
 | `MINI_APP_URL` | URL Telegram Mini App | `http://localhost:8000/miniapp/` |
 | `APP_SECRET` | Секрет приложения | нет |
-| `API_BIND` | Host bind для Docker port mapping | `0.0.0.0` |
+| `API_BIND` | Host bind для Docker port mapping | `127.0.0.1` |
 | `API_PORT` | Внешний порт API | `8000` |
 | `BOT_TOKEN` | Token Telegram-бота из BotFather | нет |
 | `BOT_USERNAME` | Username бота без обязательного `@` | `scheduler_baraholki_bot` |
@@ -344,8 +344,8 @@ Worker:
 
 ```bash
 git pull --ff-only
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build api
-docker compose -f docker-compose.yml -f docker-compose.prod.yml restart bot scheduler worker
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build migrate
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build api bot scheduler worker
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
 curl -fsS http://127.0.0.1:8000/health
 ```
@@ -357,9 +357,10 @@ curl -fsS http://127.0.0.1:8000/health
 
 ## Database Migrations
 
-Проект использует Alembic. При старте сервисов `create_schema()` запускает
-`upgrade head`; для Postgres в Alembic env используется advisory lock, чтобы
-несколько контейнеров не выполняли одну миграцию одновременно.
+Проект использует Alembic. В Docker Compose есть одноразовый сервис `migrate`,
+который выполняет `upgrade head` до старта runtime-сервисов; для Postgres в
+Alembic env используется advisory lock, чтобы несколько контейнеров не выполняли
+одну миграцию одновременно.
 
 Ручной запуск миграций:
 
