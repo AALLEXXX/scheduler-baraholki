@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import exists, func, select
 from telethon.errors import FloodWaitError
 
+from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
 from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
@@ -13,6 +14,39 @@ from autopost_manager.telegram_client import classify_send_error, send_post_from
 
 PROCESSING_TIMEOUT_SECONDS = 10 * 60
 MAX_JOB_ATTEMPTS = 3
+
+
+async def alert_job_issue(
+    job: PublishJob,
+    *,
+    action: str,
+    status: str,
+    error: str,
+    session: TelegramSession | None = None,
+) -> None:
+    post = job.post
+    chat = job.target_chat
+    alert_session = session or job.session
+    await send_alert(
+        title="Publish job issue",
+        status=status,
+        fields={
+            "action": action,
+            "owner_telegram_id": post.created_by_telegram_id,
+            "session_id": alert_session.id if alert_session else job.session_id,
+            "session_status": alert_session.status.value if alert_session else None,
+            "job_id": job.id,
+            "post_id": post.id,
+            "post_title": post.title,
+            "target_chat_id": chat.id,
+            "target_telegram_chat_id": chat.telegram_chat_id,
+            "target_title": chat.title,
+            "attempt": f"{job.attempts}/{MAX_JOB_ATTEMPTS}",
+            "job_status": job.status.value,
+            "next_attempt_at": job.next_attempt_at,
+            "error": error,
+        },
+    )
 
 
 def choose_session(db, job: PublishJob) -> TelegramSession | None:
@@ -125,6 +159,7 @@ async def process_one_job() -> bool:
             job.last_error = "No active session selected for job"
             job.locked_until = None
             db.commit()
+            await alert_job_issue(job, action="send_post", status="failed", error=job.last_error)
             return True
 
         settings = owner_settings(db, job.post.created_by_telegram_id)
@@ -133,12 +168,14 @@ async def process_one_job() -> bool:
             job.last_error = "User is banned by administrator"
             job.locked_until = None
             db.commit()
+            await alert_job_issue(job, action="send_post", status="failed", error=job.last_error, session=session)
             return True
         if settings and settings.autopost_paused:
             job.status = JobStatus.cancelled
             job.last_error = "Autoposting paused by user"
             job.locked_until = None
             db.commit()
+            await alert_job_issue(job, action="send_post", status="cancelled", error=job.last_error, session=session)
             return True
         if settings and settings.daily_send_limit is not None:
             if sent_today(db, job.post.created_by_telegram_id) >= settings.daily_send_limit:
@@ -153,6 +190,7 @@ async def process_one_job() -> bool:
             job.last_error = "Too many media items"
             job.locked_until = None
             db.commit()
+            await alert_job_issue(job, action="send_post", status="failed", error=job.last_error, session=session)
             return True
 
         try:
@@ -173,6 +211,7 @@ async def process_one_job() -> bool:
                 job.status = JobStatus.pending
                 job.next_attempt_at = datetime.now(UTC) + delay
             db.commit()
+            await alert_job_issue(job, action="send_post", status=job.status.value, error=job.last_error, session=session)
             return True
 
         job.status = JobStatus.done

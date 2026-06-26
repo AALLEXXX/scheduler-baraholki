@@ -160,6 +160,63 @@ def test_process_one_job_records_send_error(monkeypatch, db_session) -> None:
         assert refreshed.next_attempt_at is not None
 
 
+def test_process_one_job_sends_alert_with_job_context(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111, username="alice")
+    chat = make_chat(db_session, session, title="Target Chat", telegram_chat_id=-1001)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat], body="Alert post")
+    make_job(db_session, post, chat, session=session)
+    db_session.commit()
+    alerts: list[dict] = []
+
+    async def failing_send_post_from_session(*_args, **_kwargs):
+        raise RuntimeError("telegram exploded")
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
+
+    monkeypatch.setattr(worker, "send_post_from_session", failing_send_post_from_session)
+    monkeypatch.setattr(worker, "send_alert", fake_send_alert)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["title"] == "Publish job issue"
+    assert alert["status"] == "pending"
+    assert alert["fields"]["action"] == "send_post"
+    assert alert["fields"]["owner_telegram_id"] == 111
+    assert alert["fields"]["target_telegram_chat_id"] == -1001
+    assert alert["fields"]["target_title"] == "Target Chat"
+    assert alert["fields"]["post_title"] == "Alert post"
+    assert alert["fields"]["error"] == "RuntimeError: telegram exploded"
+
+
+def test_process_one_job_alert_uses_selected_fallback_session(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111, username="fallback")
+    chat = make_chat(db_session, session, title="Target Chat", telegram_chat_id=-1001)
+    post = make_post(db_session, owner_id=111, session=None, chats=[chat], body="Fallback alert post")
+    make_job(db_session, post, chat, session=None)
+    db_session.commit()
+    alerts: list[dict] = []
+
+    async def failing_send_post_from_session(*_args, **_kwargs):
+        raise RuntimeError("telegram exploded")
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
+
+    monkeypatch.setattr(worker, "send_post_from_session", failing_send_post_from_session)
+    monkeypatch.setattr(worker, "send_alert", fake_send_alert)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    assert len(alerts) == 1
+    assert alerts[0]["fields"]["session_id"] == session.id
+    assert alerts[0]["fields"]["session_status"] == SessionStatus.active.value
+
+
 def test_process_one_job_returns_false_when_queue_is_empty() -> None:
     assert asyncio.run(worker.process_one_job()) is False
 

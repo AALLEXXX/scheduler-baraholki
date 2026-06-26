@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     bot_token: str = Field(min_length=20)
     bot_username: str = "scheduler_baraholki_bot"
     admin_telegram_ids: str = ""
+    alert_chat_ids: str = "-5418121924"
 
     telegram_api_id: int
     telegram_api_hash: str = Field(min_length=16)
@@ -47,6 +48,14 @@ class Settings(BaseSettings):
             for value in self.admin_telegram_ids.split(",")
             if value.strip()
         }
+
+    @property
+    def alert_ids(self) -> list[int]:
+        return [
+            int(value.strip())
+            for value in self.alert_chat_ids.split(",")
+            if value.strip()
+        ]
 
 
 @lru_cache

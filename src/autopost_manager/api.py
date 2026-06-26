@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 from aiogram import Bot
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from telethon.errors import (
     SendCodeUnavailableError,
 )
 
+from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
 from autopost_manager.db import create_schema, get_db
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
@@ -90,6 +91,41 @@ RATE_LIMIT_LOGIN_START_ATTEMPTS = 3
 RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS = 5
 
 app = FastAPI(title="Autopost Manager")
+
+
+def request_user_id(request: Request) -> int | None:
+    init_data = request.headers.get("X-Telegram-Init-Data")
+    if not init_data:
+        return None
+    try:
+        return verify_webapp_init_data(
+            init_data,
+            get_settings().bot_token,
+            max_age_seconds=get_settings().telegram_init_data_max_age_seconds,
+        )
+    except ValueError:
+        return None
+
+
+@app.middleware("http")
+async def alert_unhandled_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        await send_alert(
+            title="Unhandled API exception",
+            status="500",
+            fields={
+                "action": "api_request",
+                "method": request.method,
+                "path": request.url.path,
+                "query": request.url.query,
+                "telegram_user_id": request_user_id(request),
+                "error_type": type(exc).__name__,
+                "error": exc,
+            },
+        )
+        raise
 
 
 @app.middleware("http")
@@ -161,7 +197,7 @@ def remaining_login_code_cooldown(session: TelegramSession) -> int:
     return max(0, int(remaining.total_seconds()))
 
 
-def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
+async def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
     logger.warning(
         "Telegram login failed: stage=%s session_id=%s owner=%s error_type=%s error=%s",
         stage,
@@ -169,6 +205,19 @@ def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> N
         session.owner_telegram_id,
         type(exc).__name__,
         exc,
+    )
+    await send_alert(
+        title="Telegram login error",
+        status="422",
+        fields={
+            "action": stage,
+            "owner_telegram_id": session.owner_telegram_id,
+            "session_id": session.id,
+            "session_status": session.status.value,
+            "phone": mask_phone(session.phone),
+            "error_type": type(exc).__name__,
+            "error": login_error_detail(stage, exc),
+        },
     )
     raise HTTPException(status_code=422, detail=login_error_detail(stage, exc)) from exc
 
@@ -567,6 +616,17 @@ async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteRes
                 await bot.delete_message(chat_id=chat_id, message_id=message_id)
             except Exception as exc:
                 result.errors.append(f"{chat_id}/{message_id}: {exc}")
+                await send_alert(
+                    title="Bot message delete error",
+                    status="error",
+                    fields={
+                        "action": "delete_bot_message",
+                        "bot_chat_id": chat_id,
+                        "bot_message_id": message_id,
+                        "error_type": type(exc).__name__,
+                        "error": exc,
+                    },
+                )
                 continue
             result.deleted += 1
     finally:
@@ -612,6 +672,17 @@ async def delete_source_messages(
         result.attempted = max(result.attempted, result.deleted)
     except Exception as exc:
         result.errors.append(f"user session: {exc}")
+        await send_alert(
+            title="Source message delete error",
+            status="error",
+            fields={
+                "action": "delete_source_messages",
+                "owner_telegram_id": telegram_user_id,
+                "source_message_ids": ",".join(str(message_id) for message_id in message_ids),
+                "error_type": type(exc).__name__,
+                "error": exc,
+            },
+        )
 
     if result.deleted == 0:
         fallback = await delete_bot_messages(refs)
@@ -798,7 +869,7 @@ async def start_account_login(
     except Exception as exc:
         session.phone_code_hash = None
         db.commit()
-        raise_login_error("start-login", session, exc)
+        await raise_login_error("start-login", session, exc)
 
     session.phone_code_hash = code_request.phone_code_hash
     session.status = SessionStatus.code_needed
@@ -844,7 +915,7 @@ async def confirm_account_code(
     except Exception as exc:
         session.phone_code_hash = None
         db.commit()
-        raise_login_error("confirm-code", session, exc)
+        await raise_login_error("confirm-code", session, exc)
 
     if not completed:
         session.status = SessionStatus.password_needed
@@ -886,7 +957,7 @@ async def confirm_account_password(
     except Exception as exc:
         session.phone_code_hash = None
         db.commit()
-        raise_login_error("confirm-password", session, exc)
+        await raise_login_error("confirm-password", session, exc)
 
     session.telegram_user_id = me.id
     session.username = me.username
@@ -1008,6 +1079,18 @@ async def sync_session_chats(
         dialogs = await list_dialogs_from_session(sender_session)
     except RuntimeError as exc:
         logger.warning("Telegram dialog sync failed: session_id=%s error=%s", sender_session.id, exc)
+        await send_alert(
+            title="Telegram dialog sync error",
+            status="409",
+            fields={
+                "action": "sync_chats",
+                "owner_telegram_id": telegram_user_id,
+                "session_id": sender_session.id,
+                "session_status": sender_session.status.value,
+                "error_type": type(exc).__name__,
+                "error": exc,
+            },
+        )
         raise HTTPException(status_code=409, detail="Не удалось синхронизировать чаты Telegram") from exc
 
     imported = 0
@@ -1078,6 +1161,18 @@ async def list_folders(
             folders = await list_dialog_folders_from_session(session)
         except RuntimeError as exc:
             logger.warning("Telegram folder sync failed: session_id=%s error=%s", session.id, exc)
+            await send_alert(
+                title="Telegram folder sync error",
+                status="409",
+                fields={
+                    "action": "sync_folders",
+                    "owner_telegram_id": telegram_user_id,
+                    "session_id": session.id,
+                    "session_status": session.status.value,
+                    "error_type": type(exc).__name__,
+                    "error": exc,
+                },
+            )
             raise HTTPException(status_code=409, detail="Не удалось синхронизировать папки Telegram") from exc
 
         for folder in folders:
@@ -1467,6 +1562,20 @@ async def audit_message_for_user(db: Session, *, telegram_user_id: int, job_id: 
         )
     except RuntimeError as exc:
         logger.warning("Telegram audit message lookup failed: job_id=%s error=%s", job.id, exc)
+        await send_alert(
+            title="Audit message lookup error",
+            status="409",
+            fields={
+                "action": "view_audit_message",
+                "owner_telegram_id": telegram_user_id,
+                "job_id": job.id,
+                "target_telegram_chat_id": chat.telegram_chat_id,
+                "target_title": chat.title,
+                "telegram_message_id": job.telegram_message_id,
+                "error_type": type(exc).__name__,
+                "error": exc,
+            },
+        )
         raise HTTPException(status_code=409, detail="Не удалось получить сообщение из Telegram") from exc
 
     if not message:

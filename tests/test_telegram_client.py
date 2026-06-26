@@ -392,6 +392,16 @@ def test_classify_send_error_formats_generic_exception() -> None:
     assert telegram_client.classify_send_error(RuntimeError("boom")) == "RuntimeError: boom"
 
 
+def test_classify_send_error_explains_chat_write_forbidden() -> None:
+    class UserBannedInChannelError(RuntimeError):
+        pass
+
+    message = telegram_client.classify_send_error(UserBannedInChannelError("banned from sending messages"))
+
+    assert message.startswith("Chat write forbidden")
+    assert "not allowed to post" in message
+
+
 def test_delete_messages_from_session_uses_user_session(monkeypatch, db_session) -> None:
     session = make_session(db_session)
     fake_client = AuthorizedClient()

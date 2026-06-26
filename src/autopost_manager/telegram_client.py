@@ -648,6 +648,18 @@ def classify_send_error(exc: Exception, session: TelegramSession | None = None) 
         if session:
             session.status = SessionStatus.limited
         return f"FloodWait: wait {exc.seconds} seconds"
+    error_name = exc.__class__.__name__
+    lowered = f"{error_name} {exc}".lower()
+    if (
+        "writeforbidden" in lowered
+        or "userbannedinchannel" in lowered
+        or "chatadminrequired" in lowered
+        or "chatwriteforbidden" in lowered
+        or "not enough rights" in lowered
+        or "can't write" in lowered
+        or "cannot write" in lowered
+    ):
+        return f"Chat write forbidden: user is banned or not allowed to post in this chat ({error_name}: {exc})"
     return f"{exc.__class__.__name__}: {exc}"
 
 

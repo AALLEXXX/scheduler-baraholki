@@ -412,6 +412,10 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     auth_user(111)
     existing = make_session(db_session, owner_id=111, phone="+995000000000")
     db_session.commit()
+    alerts: list[dict] = []
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
 
     async def fake_request_login_code(session, *, force_sms=False):
         assert force_sms is True
@@ -422,6 +426,7 @@ def test_start_login_updates_existing_session_and_reports_send_error(
             timeout=None,
         )
 
+    monkeypatch.setattr(api_module, "send_alert", fake_send_alert)
     monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
 
     response = client.post(
@@ -452,6 +457,11 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     assert response.status_code == 422
     assert "Не удалось отправить код Telegram" in response.text
     assert "telegram rejected phone" not in response.text
+    assert len(alerts) == 1
+    assert alerts[0]["title"] == "Telegram login error"
+    assert alerts[0]["fields"]["action"] == "start-login"
+    assert alerts[0]["fields"]["owner_telegram_id"] == 111
+    assert alerts[0]["fields"]["error_type"] == "RuntimeError"
 
 
 def test_start_login_enforces_code_request_cooldown(
@@ -837,6 +847,10 @@ def test_sync_chats_rejects_foreign_session_and_telegram_runtime_error(
 ) -> None:
     session = make_session(db_session, owner_id=111)
     db_session.commit()
+    alerts: list[dict] = []
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
 
     auth_user(222)
     response = client.post(f"/api/sessions/{session.id}/sync-chats")
@@ -847,11 +861,17 @@ def test_sync_chats_rejects_foreign_session_and_telegram_runtime_error(
     async def failing_dialogs(_session):
         raise RuntimeError("Telegram session needs login")
 
+    monkeypatch.setattr(api_module, "send_alert", fake_send_alert)
     monkeypatch.setattr(api_module, "list_dialogs_from_session", failing_dialogs)
     response = client.post(f"/api/sessions/{session.id}/sync-chats")
     assert response.status_code == 409
     assert "Не удалось синхронизировать" in response.text
     assert "needs login" not in response.text
+    assert len(alerts) == 1
+    assert alerts[0]["title"] == "Telegram dialog sync error"
+    assert alerts[0]["fields"]["action"] == "sync_chats"
+    assert alerts[0]["fields"]["owner_telegram_id"] == 111
+    assert alerts[0]["fields"]["session_id"] == session.id
 
 
 def test_create_chat_validates_owner_and_duplicate(client, auth_user, db_session) -> None:
