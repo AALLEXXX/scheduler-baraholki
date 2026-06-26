@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 import logging
 import uuid
 from pathlib import Path
@@ -47,9 +47,7 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     UserSettingsOut,
 )
-from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
-from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.security import require_user, verify_webapp_init_data
@@ -94,6 +92,8 @@ request_user_id = api_runtime.request_user_id
 security_headers = api_runtime.security_headers
 startup = api_runtime.startup
 validate_runtime_settings = api_runtime.validate_runtime_settings
+
+__all__ = ["PostStatus"]
 
 LOGIN_CODE_COOLDOWN_SECONDS = 90
 RATE_LIMIT_LOGIN_START_WINDOW_SECONDS = 10 * 60
@@ -290,36 +290,8 @@ def require_autopost_enabled(
         raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
 
 
-def active_scheduled_posts_count(db: Session, telegram_user_id: int) -> int:
-    return PostRepository(db).count_active_scheduled_for_owner(telegram_user_id)
-
-
 def user_sessions_count(db: Session, telegram_user_id: int) -> int:
     return TelegramSessionRepository(db).count_non_revoked_for_owner(telegram_user_id)
-
-
-def enforce_active_post_limit(
-    db: Session,
-    telegram_user_id: int,
-    *,
-    current_post: Post | None = None,
-) -> None:
-    settings = get_settings()
-    count = active_scheduled_posts_count(db, telegram_user_id)
-    if current_post and current_post.status == PostStatus.scheduled:
-        count -= 1
-    if count >= settings.max_active_posts_per_user:
-        raise HTTPException(status_code=429, detail="Достигнут лимит активных запланированных постов")
-
-
-def enforce_daily_job_creation_limit(db: Session, telegram_user_id: int, jobs_to_create: int) -> None:
-    settings = get_settings()
-    today_jobs = PublishJobRepository(db).count_created_since_for_owner(
-        owner_telegram_id=telegram_user_id,
-        since=day_start(),
-    )
-    if today_jobs + jobs_to_create > settings.max_jobs_per_user_per_day:
-        raise HTTPException(status_code=429, detail="Достигнут дневной лимит постановки задач в очередь")
 
 
 def mask_phone(phone: str | None) -> str | None:
@@ -376,65 +348,6 @@ async def delete_source_messages(
         created_at=created_at,
         media_count=media_count,
     )
-
-
-def validate_post_schedule(
-    *,
-    schedule_kind: ScheduleKind,
-    next_run_at: datetime | None,
-    interval_minutes: int | None,
-    schedule_weekdays: list[int] | None,
-    spam_risk_acknowledged: bool,
-    default_session_id: uuid.UUID | None,
-    target_chat_ids: list[uuid.UUID],
-) -> None:
-    if next_run_at is None:
-        raise HTTPException(status_code=422, detail="Выберите дату отправки")
-    if as_aware(next_run_at) <= datetime.now(UTC):
-        raise HTTPException(status_code=422, detail="Выберите будущую дату отправки")
-
-    if schedule_kind == ScheduleKind.interval:
-        if interval_minutes is None:
-            raise HTTPException(status_code=422, detail="Укажите интервал повтора")
-        if interval_minutes < 20:
-            raise HTTPException(status_code=422, detail="Минимальный интервал повтора — 20 минут")
-        if interval_minutes <= 30 and not spam_risk_acknowledged:
-            raise HTTPException(
-                status_code=422,
-                detail="Подтвердите риск: за частую отправку сообщений Telegram может ограничить аккаунт",
-            )
-    elif schedule_kind == ScheduleKind.custom_weekdays:
-        days = serialize_schedule_weekdays(schedule_weekdays)
-        if not days:
-            raise HTTPException(status_code=422, detail="Выберите хотя бы один день недели")
-
-    if not default_session_id:
-        raise HTTPException(status_code=422, detail="Сначала подключите Telegram-аккаунт")
-    if not target_chat_ids:
-        raise HTTPException(status_code=422, detail="Выберите хотя бы одну группу")
-    if len(set(target_chat_ids)) > get_settings().max_targets_per_post:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Можно выбрать не больше {get_settings().max_targets_per_post} групп на один пост",
-        )
-
-
-def validate_owned_session_and_targets(
-    *,
-    telegram_user_id: int,
-    session_id: uuid.UUID | None,
-    target_chat_ids: list[uuid.UUID],
-    db: Session,
-) -> None:
-    if session_id:
-        session = TelegramSessionRepository(db).fetch_owned_active(session_id, telegram_user_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Telegram account not found")
-
-    for target_chat_id in target_chat_ids:
-        target = TargetChatRepository(db).fetch_owned_enabled(target_chat_id, telegram_user_id)
-        if not target:
-            raise HTTPException(status_code=404, detail="Group not found")
 
 
 def delete_session_files(session_path: str | None) -> None:
