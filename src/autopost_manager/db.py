@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Generator
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from autopost_manager.config import get_settings
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-engine = create_engine(get_settings().database_url, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+from autopost_manager.database.connection import Base
+from autopost_manager.database.connection import SessionLocal
+from autopost_manager.database.connection import engine
+from autopost_manager.database.connection import get_db
 
 
 def create_schema() -> None:
@@ -89,9 +82,13 @@ def ensure_runtime_columns() -> None:
             connection.exec_driver_sql(statement)
 
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+__all__ = [
+    "Base",
+    "SessionLocal",
+    "alembic_config",
+    "create_schema",
+    "engine",
+    "ensure_runtime_columns",
+    "get_db",
+    "run_migrations",
+]
