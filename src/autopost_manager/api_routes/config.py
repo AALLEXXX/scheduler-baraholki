@@ -3,18 +3,23 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from autopost_manager import api as handlers
+from autopost_manager.api_routes.helpers import add_dual_route
 from autopost_manager.schemas import AppConfigOut, UserSettingsOut
 
 router = APIRouter()
 
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/app-config",
+    "/rest/autopost/app-config",
     handlers.app_config,
     methods=["GET"],
     response_model=AppConfigOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/user-settings",
+    "/rest/autopost/user-settings",
     handlers.get_user_settings,
     methods=["GET"],
     response_model=UserSettingsOut,

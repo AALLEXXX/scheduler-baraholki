@@ -1,5 +1,7 @@
 const tg = window.Telegram?.WebApp;
-const apiBase = window.location.pathname.startsWith("/scheduler") ? "/scheduler/api" : "/api";
+const apiPrefix = window.location.pathname.startsWith("/scheduler") ? "/scheduler" : "";
+const restApiBase = `${apiPrefix}/rest/autopost`;
+const rpcApiBase = `${apiPrefix}/rpc/autopost`;
 const riskyChatSelectionLimit = 15;
 const languageStorageKey = "autopost-manager-language";
 const supportedLanguages = ["en", "ru"];
@@ -644,7 +646,7 @@ function headers() {
 
 async function api(path, options = {}) {
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  const response = await fetch(`${apiBase}${cleanPath}`, {
+  const response = await fetch(`${apiBaseForPath(cleanPath)}${cleanPath}`, {
     ...options,
     headers: { ...headers(), ...(options.headers || {}) },
   });
@@ -667,6 +669,18 @@ async function api(path, options = {}) {
     throw new Error(message);
   }
   return response.json();
+}
+
+function apiBaseForPath(cleanPath) {
+  const pathOnly = cleanPath.split("?")[0];
+  if (
+    pathOnly.startsWith("/account/") ||
+    /^\/sessions\/[^/]+\/sync-chats$/.test(pathOnly) ||
+    /^\/posts\/[^/]+\/(schedule|pause|resume|enqueue-now)$/.test(pathOnly)
+  ) {
+    return rpcApiBase;
+  }
+  return restApiBase;
 }
 
 function setBusy(button, busy, text) {

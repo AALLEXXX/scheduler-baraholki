@@ -247,6 +247,9 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "groupPageSize: 10" in js
     assert "selectedFolderId" in js
     assert 'api("folders")' in js
+    assert 'const restApiBase = `${apiPrefix}/rest/autopost`' in js
+    assert 'const rpcApiBase = `${apiPrefix}/rpc/autopost`' in js
+    assert "function apiBaseForPath(cleanPath)" in js
     assert "function renderFolderPicker" in js
     assert ".folder-chip" in css
     assert "flex-wrap: wrap" in css

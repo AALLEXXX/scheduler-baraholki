@@ -49,6 +49,7 @@ def test_protected_routes_reject_missing_telegram_init_data(client) -> None:
 def test_health_routes_are_public(client) -> None:
     assert client.get("/health").json()["ok"] is True
     assert client.get("/api/health").json()["ok"] is True
+    assert client.get("/rest/autopost/health").json()["ok"] is True
 
 
 def test_app_config_returns_bot_username(client) -> None:
@@ -56,6 +57,27 @@ def test_app_config_returns_bot_username(client) -> None:
 
     assert response.status_code == 200
     assert response.json()["bot_username"] == "scheduler_baraholki_bot"
+
+
+def test_rest_and_rpc_routes_are_available(client, auth_user, db_session) -> None:
+    auth_user(111)
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session, title="REST Group")
+    db_session.commit()
+
+    assert client.get("/rest/autopost/app-config").status_code == 200
+    assert client.get("/rest/autopost/sessions").status_code == 200
+    assert client.get("/rest/autopost/chats").status_code == 200
+
+    response = client.post(
+        "/rest/autopost/posts",
+        json=post_payload(str(session.id), [str(chat.id)]),
+    )
+    assert response.status_code == 200, response.text
+    post_id = response.json()["id"]
+
+    pause = client.patch(f"/rpc/autopost/posts/{post_id}/pause")
+    assert pause.status_code == 200, pause.text
 
 
 def test_create_once_post_returns_200_and_persists_targets(client, auth_user, db_session) -> None:

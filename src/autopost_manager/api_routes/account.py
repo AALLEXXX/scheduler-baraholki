@@ -3,48 +3,63 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from autopost_manager import api as handlers
+from autopost_manager.api_routes.helpers import add_dual_route
 from autopost_manager.schemas import AccountLoginOut, AccountPauseOut, AccountRevokeOut
 
 router = APIRouter()
 
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/start-login",
+    "/rpc/autopost/account/start-login",
     handlers.start_account_login,
     methods=["POST"],
     response_model=AccountLoginOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/confirm-code",
+    "/rpc/autopost/account/confirm-code",
     handlers.confirm_account_code,
     methods=["POST"],
     response_model=AccountLoginOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/confirm-password",
+    "/rpc/autopost/account/confirm-password",
     handlers.confirm_account_password,
     methods=["POST"],
     response_model=AccountLoginOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/pause",
+    "/rpc/autopost/account/pause",
     handlers.pause_account,
     methods=["POST"],
     response_model=AccountPauseOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/logout",
+    "/rpc/autopost/account/logout",
     handlers.logout_account,
     methods=["POST"],
     response_model=AccountPauseOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/resume",
+    "/rpc/autopost/account/resume",
     handlers.resume_account,
     methods=["POST"],
     response_model=AccountPauseOut,
 )
-router.add_api_route(
+add_dual_route(
+    router,
     "/api/account/revoke-session",
+    "/rpc/autopost/account/revoke-session",
     handlers.revoke_account_session,
     methods=["POST"],
     response_model=AccountRevokeOut,

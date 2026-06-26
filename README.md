@@ -264,36 +264,20 @@ docker compose up -d --build api
 Публичные endpoints:
 
 - `GET /health`
-- `GET /api/health`
+- `GET /rest/autopost/health`
 
 Основные защищённые endpoints Mini App:
 
-- `GET /api/app-config`
-- `GET /api/user-settings`
-- `GET /api/sessions`
-- `POST /api/account/start-login`
-- `POST /api/account/confirm-code`
-- `POST /api/account/confirm-password`
-- `POST /api/account/pause`
-- `POST /api/account/resume`
-- `POST /api/account/logout`
-- `POST /api/account/revoke-session`
-- `POST /api/sessions/{session_id}/sync-chats`
-- `GET /api/chats`
-- `GET /api/folders`
-- `POST /api/chats`
-- `GET /api/posts`
-- `POST /api/posts`
-- `POST /api/posts/{post_id}/schedule`
-- `PATCH /api/posts/{post_id}/pause`
-- `PATCH /api/posts/{post_id}/resume`
-- `DELETE /api/posts/{post_id}`
-- `POST /api/posts/{post_id}/enqueue-now`
-- `GET /api/jobs`
-- `GET /api/audit`
-- `GET /api/admin/users`
-- `PATCH /api/admin/users/{telegram_user_id}`
-- `GET /api/admin/stats`
+- REST resources use `/rest/autopost/...`, for example `GET /rest/autopost/posts`,
+  `POST /rest/autopost/posts`, `GET /rest/autopost/audit` and
+  `PATCH /rest/autopost/admin/users/{telegram_user_id}`.
+- RPC actions use `/rpc/autopost/...`, for example
+  `POST /rpc/autopost/account/start-login`,
+  `POST /rpc/autopost/sessions/{session_id}/sync-chats` and
+  `POST /rpc/autopost/posts/{post_id}/schedule`.
+
+Legacy `/api/...` routes are still registered for backward compatibility and
+marked deprecated in OpenAPI.
 
 Защищённые endpoints требуют заголовок:
 
