@@ -68,6 +68,8 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     UserSettingsOut,
 )
+from autopost_manager.repositories.target_chats import TargetChatRepository
+from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.schedule import WeekdaySet
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.services.admin import AdminService
@@ -760,13 +762,7 @@ def list_sessions(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TelegramSession]:
-    return list(
-        db.scalars(
-            select(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .order_by(TelegramSession.created_at.desc())
-        )
-    )
+    return TelegramSessionRepository(db).list_for_owner(telegram_user_id)
 
 
 async def start_account_login(
@@ -852,8 +848,8 @@ async def confirm_account_code(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    session = db.get(TelegramSession, payload.session_id)
-    if not session or session.owner_telegram_id != telegram_user_id:
+    session = TelegramSessionRepository(db).fetch_owned(payload.session_id, telegram_user_id)
+    if not session:
         raise HTTPException(status_code=404, detail="Telegram account not found")
     check_rate_limit(
         db,
@@ -893,8 +889,8 @@ async def confirm_account_password(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    session = db.get(TelegramSession, payload.session_id)
-    if not session or session.owner_telegram_id != telegram_user_id:
+    session = TelegramSessionRepository(db).fetch_owned(payload.session_id, telegram_user_id)
+    if not session:
         raise HTTPException(status_code=404, detail="Telegram account not found")
     check_rate_limit(
         db,
@@ -966,20 +962,8 @@ async def revoke_account_session(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountRevokeOut:
-    sessions = list(
-        db.scalars(
-            select(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .where(TelegramSession.status != SessionStatus.revoked)
-        )
-    )
-    chats = list(
-        db.scalars(
-            select(TargetChat)
-            .where(TargetChat.owner_telegram_id == telegram_user_id)
-            .where(TargetChat.enabled.is_(True))
-        )
-    )
+    sessions = TelegramSessionRepository(db).list_non_revoked_for_owner(telegram_user_id)
+    chats = TargetChatRepository(db).list_enabled_for_owner(telegram_user_id)
 
     telegram_logout_errors: list[str] = []
     for session in sessions:
@@ -1017,8 +1001,8 @@ async def sync_session_chats(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
-    sender_session = db.get(TelegramSession, session_id)
-    if not sender_session or sender_session.owner_telegram_id != telegram_user_id:
+    sender_session = TelegramSessionRepository(db).fetch_owned(session_id, telegram_user_id)
+    if not sender_session:
         raise HTTPException(status_code=404, detail="Telegram account not found")
     require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
 
@@ -1041,30 +1025,18 @@ async def sync_session_chats(
         raise HTTPException(status_code=409, detail="Не удалось синхронизировать чаты Telegram") from exc
 
     imported = 0
+    target_chats = TargetChatRepository(db)
     for dialog in dialogs:
-        existing = db.scalars(
-            select(TargetChat)
-            .where(TargetChat.session_id == sender_session.id)
-            .where(TargetChat.telegram_chat_id == dialog["telegram_chat_id"])
-        ).first()
         chat_type = TargetChatType.channel if dialog["is_channel"] and not dialog["is_group"] else TargetChatType.supergroup
-        if existing:
-            existing.title = str(dialog["title"])
-            existing.username = dialog["username"] if dialog["username"] else None
-            existing.type = chat_type
-            existing.enabled = True
-        else:
-            db.add(
-                TargetChat(
-                    owner_telegram_id=telegram_user_id,
-                    session_id=sender_session.id,
-                    telegram_chat_id=int(dialog["telegram_chat_id"]),
-                    title=str(dialog["title"]),
-                    username=dialog["username"] if dialog["username"] else None,
-                    type=chat_type,
-                    enabled=True,
-                )
-            )
+        created = target_chats.upsert_synced_dialog(
+            owner_telegram_id=telegram_user_id,
+            session_id=sender_session.id,
+            telegram_chat_id=int(dialog["telegram_chat_id"]),
+            title=str(dialog["title"]),
+            username=dialog["username"] if dialog["username"] else None,
+            chat_type=chat_type,
+        )
+        if created:
             imported += 1
     db.commit()
     return {"imported": imported, "total_dialogs": len(dialogs)}
@@ -1074,28 +1046,14 @@ def list_chats(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TargetChat]:
-    return list(
-        db.scalars(
-            select(TargetChat)
-            .where(TargetChat.owner_telegram_id == telegram_user_id)
-            .where(TargetChat.enabled.is_(True))
-            .order_by(TargetChat.title)
-        )
-    )
+    return TargetChatRepository(db).list_enabled_for_owner(telegram_user_id)
 
 
 async def list_folders(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[DialogFolderOut]:
-    sessions = list(
-        db.scalars(
-            select(TelegramSession)
-            .where(TelegramSession.owner_telegram_id == telegram_user_id)
-            .where(TelegramSession.status == SessionStatus.active)
-            .order_by(TelegramSession.updated_at.desc())
-        )
-    )
+    sessions = TelegramSessionRepository(db).list_active_for_owner(telegram_user_id)
     if not sessions:
         return []
 

@@ -15,6 +15,40 @@ class TelegramSessionRepository:
     def fetch_by_id(self, session_id: UUID) -> TelegramSession | None:
         return self.db.get(TelegramSession, session_id)
 
+    def fetch_owned(self, session_id: UUID, owner_telegram_id: int) -> TelegramSession | None:
+        session = self.fetch_by_id(session_id)
+        if not session or session.owner_telegram_id != owner_telegram_id:
+            return None
+        return session
+
+    def list_for_owner(self, owner_telegram_id: int) -> list[TelegramSession]:
+        return list(
+            self.db.scalars(
+                select(TelegramSession)
+                .where(TelegramSession.owner_telegram_id == owner_telegram_id)
+                .order_by(TelegramSession.created_at.desc())
+            )
+        )
+
+    def list_active_for_owner(self, owner_telegram_id: int) -> list[TelegramSession]:
+        return list(
+            self.db.scalars(
+                select(TelegramSession)
+                .where(TelegramSession.owner_telegram_id == owner_telegram_id)
+                .where(TelegramSession.status == SessionStatus.active)
+                .order_by(TelegramSession.updated_at.desc())
+            )
+        )
+
+    def list_non_revoked_for_owner(self, owner_telegram_id: int) -> list[TelegramSession]:
+        return list(
+            self.db.scalars(
+                select(TelegramSession)
+                .where(TelegramSession.owner_telegram_id == owner_telegram_id)
+                .where(TelegramSession.status != SessionStatus.revoked)
+            )
+        )
+
     def latest_for_owner(self, owner_telegram_id: int) -> TelegramSession | None:
         return self.db.scalars(
             select(TelegramSession)
