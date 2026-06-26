@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 import logging
@@ -10,9 +8,10 @@ from pathlib import Path
 
 import uvicorn
 from aiogram import Bot
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from autopost_manager.alerts import send_alert
+from autopost_manager import api_runtime
 from autopost_manager.config import get_settings
 from autopost_manager.db import get_db
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
@@ -89,61 +88,18 @@ from autopost_manager.telegram_client import (
 )
 
 logger = logging.getLogger(__name__)
+alert_unhandled_errors = api_runtime.alert_unhandled_errors
+lifespan = api_runtime.lifespan
+request_user_id = api_runtime.request_user_id
+security_headers = api_runtime.security_headers
+startup = api_runtime.startup
+validate_runtime_settings = api_runtime.validate_runtime_settings
+
 LOGIN_CODE_COOLDOWN_SECONDS = 90
 RATE_LIMIT_LOGIN_START_WINDOW_SECONDS = 10 * 60
 RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS = 15 * 60
 RATE_LIMIT_LOGIN_START_ATTEMPTS = 3
 RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS = 5
-
-
-def request_user_id(request: Request) -> int | None:
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    if not init_data:
-        return None
-    try:
-        return verify_webapp_init_data(
-            init_data,
-            get_settings().bot_token,
-            max_age_seconds=get_settings().telegram_init_data_max_age_seconds,
-        )
-    except ValueError:
-        return None
-
-
-async def alert_unhandled_errors(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception as exc:
-        await send_alert(
-            title="Unhandled API exception",
-            status="500",
-            fields={
-                "action": "api_request",
-                "method": request.method,
-                "path": request.url.path,
-                "query": request.url.query,
-                "telegram_user_id": request_user_id(request),
-                "error_type": type(exc).__name__,
-                "error": exc,
-            },
-        )
-        raise
-
-
-async def security_headers(request, call_next):
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "default-src 'self' https://telegram.org https://*.telegram.org; "
-        "script-src 'self' 'unsafe-inline' https://telegram.org; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https://*.telegram.org https://api.telegram.org; "
-        "connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org;",
-    )
-    return response
 
 
 def login_error_detail(stage: str, exc: Exception) -> str:
@@ -165,27 +121,6 @@ async def raise_login_error(stage: str, session: TelegramSession, exc: Exception
         exc=exc,
         send_alert=send_alert,
     )
-
-
-def validate_runtime_settings() -> None:
-    settings = get_settings()
-    if settings.app_env != "local" and settings.allow_local_auth_bypass:
-        raise RuntimeError("ALLOW_LOCAL_AUTH_BYPASS must be disabled outside local")
-    if settings.app_env != "local" and not settings.app_encryption_key:
-        raise RuntimeError("APP_ENCRYPTION_KEY is required outside local")
-    if settings.allow_local_auth_bypass and not settings.local_dev_user_id:
-        raise RuntimeError("LOCAL_DEV_USER_ID is required when local auth bypass is enabled")
-
-
-def startup() -> None:
-    validate_runtime_settings()
-    get_settings().telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
-
-
-@asynccontextmanager
-async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
-    startup()
-    yield
 
 
 def post_to_out(post: Post) -> PostOut:
@@ -844,7 +779,7 @@ def admin_stats(
     return AdminService(db).stats()
 
 
-def _create_application() -> FastAPI:
+def _create_application():
     from autopost_manager.api_routes.application import create_application
 
     return create_application()
