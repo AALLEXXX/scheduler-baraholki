@@ -1,7 +1,10 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    UV_SYSTEM_PYTHON=1
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -13,7 +16,7 @@ COPY miniapp ./miniapp
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-RUN pip install --no-cache-dir . \
+RUN uv pip install --no-cache . \
     && mkdir -p /data \
     && chown -R app:app /app /data
 
