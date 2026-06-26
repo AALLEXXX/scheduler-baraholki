@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import logging
@@ -9,7 +11,6 @@ from pathlib import Path
 import uvicorn
 from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from telethon.errors import (
@@ -60,15 +61,12 @@ from autopost_manager.schemas import (
     AuditPageOut,
     DeletePostOut,
     DialogFolderOut,
-    JobOut,
     PostCreate,
     PostMediaOut,
     PostOut,
     PostResumeUpdate,
     PostScheduleUpdate,
     TargetChatCreate,
-    TargetChatOut,
-    TelegramSessionOut,
     UserSettingsOut,
 )
 from autopost_manager.security import require_user, verify_webapp_init_data
@@ -90,8 +88,6 @@ RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS = 15 * 60
 RATE_LIMIT_LOGIN_START_ATTEMPTS = 3
 RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS = 5
 
-app = FastAPI(title="Autopost Manager")
-
 
 def request_user_id(request: Request) -> int | None:
     init_data = request.headers.get("X-Telegram-Init-Data")
@@ -107,7 +103,6 @@ def request_user_id(request: Request) -> int | None:
         return None
 
 
-@app.middleware("http")
 async def alert_unhandled_errors(request: Request, call_next):
     try:
         return await call_next(request)
@@ -128,7 +123,6 @@ async def alert_unhandled_errors(request: Request, call_next):
         raise
 
 
-@app.middleware("http")
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -232,16 +226,16 @@ def validate_runtime_settings() -> None:
         raise RuntimeError("LOCAL_DEV_USER_ID is required when local auth bypass is enabled")
 
 
-@app.on_event("startup")
 def startup() -> None:
     validate_runtime_settings()
     create_schema()
     get_settings().telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
 
 
-miniapp_dir = get_settings().miniapp_dir
-if miniapp_dir.exists():
-    app.mount("/miniapp", StaticFiles(directory=miniapp_dir, html=True), name="miniapp")
+@asynccontextmanager
+async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+    startup()
+    yield
 
 
 @dataclass
@@ -767,17 +761,14 @@ def delete_session_files(session_path: str | None) -> None:
             pass
 
 
-@app.get("/health")
 def health() -> dict[str, object]:
     return {"ok": True, "env": get_settings().app_env}
 
 
-@app.get("/api/health")
 def api_health() -> dict[str, object]:
     return health()
 
 
-@app.get("/api/app-config", response_model=AppConfigOut)
 def app_config(telegram_user_id: int | None = Depends(optional_telegram_user_id)) -> AppConfigOut:
     logger.info(
         "Miniapp config requested: telegram_user_id=%s is_admin=%s",
@@ -790,7 +781,6 @@ def app_config(telegram_user_id: int | None = Depends(optional_telegram_user_id)
     )
 
 
-@app.get("/api/user-settings", response_model=UserSettingsOut)
 def get_user_settings(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -800,7 +790,6 @@ def get_user_settings(
     return UserSettingsOut(autopost_paused=settings.autopost_paused)
 
 
-@app.get("/api/sessions", response_model=list[TelegramSessionOut])
 def list_sessions(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -814,7 +803,6 @@ def list_sessions(
     )
 
 
-@app.post("/api/account/start-login", response_model=AccountLoginOut)
 async def start_account_login(
     payload: AccountStartLogin,
     telegram_user_id: int = Depends(require_user),
@@ -893,7 +881,6 @@ async def start_account_login(
     )
 
 
-@app.post("/api/account/confirm-code", response_model=AccountLoginOut)
 async def confirm_account_code(
     payload: AccountCodeConfirm,
     telegram_user_id: int = Depends(require_user),
@@ -935,7 +922,6 @@ async def confirm_account_code(
     return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
-@app.post("/api/account/confirm-password", response_model=AccountLoginOut)
 async def confirm_account_password(
     payload: AccountPasswordConfirm,
     telegram_user_id: int = Depends(require_user),
@@ -982,7 +968,6 @@ def cancel_user_pending_jobs(*, telegram_user_id: int, db: Session) -> int:
     return len(jobs)
 
 
-@app.post("/api/account/pause", response_model=AccountPauseOut)
 def pause_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -994,7 +979,6 @@ def pause_account(
     return AccountPauseOut(autopost_paused=True, cancelled_jobs=cancelled)
 
 
-@app.post("/api/account/logout", response_model=AccountPauseOut)
 def logout_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1002,7 +986,6 @@ def logout_account(
     return pause_account(telegram_user_id=telegram_user_id, db=db)
 
 
-@app.post("/api/account/resume", response_model=AccountPauseOut)
 def resume_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1013,7 +996,6 @@ def resume_account(
     return AccountPauseOut(autopost_paused=False, cancelled_jobs=0)
 
 
-@app.post("/api/account/revoke-session", response_model=AccountRevokeOut)
 async def revoke_account_session(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1064,7 +1046,6 @@ async def revoke_account_session(
     )
 
 
-@app.post("/api/sessions/{session_id}/sync-chats")
 async def sync_session_chats(
     session_id: uuid.UUID,
     telegram_user_id: int = Depends(require_user),
@@ -1123,7 +1104,6 @@ async def sync_session_chats(
     return {"imported": imported, "total_dialogs": len(dialogs)}
 
 
-@app.get("/api/chats", response_model=list[TargetChatOut])
 def list_chats(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1138,7 +1118,6 @@ def list_chats(
     )
 
 
-@app.get("/api/folders", response_model=list[DialogFolderOut])
 async def list_folders(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1191,7 +1170,6 @@ async def list_folders(
     return list(rows_by_key.values())
 
 
-@app.post("/api/chats", response_model=TargetChatOut)
 def create_chat(
     payload: TargetChatCreate,
     telegram_user_id: int = Depends(require_user),
@@ -1203,7 +1181,6 @@ def create_chat(
     )
 
 
-@app.get("/api/posts", response_model=list[PostOut])
 def list_posts(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1223,7 +1200,6 @@ def list_posts(
     return [post_to_out(post) for post in posts]
 
 
-@app.post("/api/posts", response_model=PostOut)
 def create_post(
     payload: PostCreate,
     telegram_user_id: int = Depends(require_user),
@@ -1266,7 +1242,6 @@ def create_post(
     return post_to_out(post)
 
 
-@app.post("/api/posts/{post_id}/schedule", response_model=PostOut)
 def schedule_post(
     post_id: uuid.UUID,
     payload: PostScheduleUpdate,
@@ -1318,7 +1293,6 @@ def schedule_post(
     return post_to_out(post)
 
 
-@app.patch("/api/posts/{post_id}/pause", response_model=PostOut)
 def pause_post(
     post_id: uuid.UUID,
     telegram_user_id: int = Depends(require_user),
@@ -1339,7 +1313,6 @@ def pause_post(
     return post_to_out(post)
 
 
-@app.patch("/api/posts/{post_id}/resume", response_model=PostOut)
 def resume_post(
     post_id: uuid.UUID,
     payload: PostResumeUpdate,
@@ -1365,7 +1338,6 @@ def resume_post(
     return post_to_out(post)
 
 
-@app.delete("/api/posts/{post_id}", response_model=DeletePostOut)
 async def delete_post(
     post_id: uuid.UUID,
     telegram_user_id: int = Depends(require_user),
@@ -1406,7 +1378,6 @@ async def delete_post(
     )
 
 
-@app.post("/api/posts/{post_id}/enqueue-now")
 def enqueue_now(
     post_id: uuid.UUID,
     telegram_user_id: int = Depends(require_user),
@@ -1447,7 +1418,6 @@ def enqueue_now(
     return {"ok": True, "jobs_created": count}
 
 
-@app.get("/api/jobs", response_model=list[JobOut])
 def list_jobs(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1466,7 +1436,6 @@ def list_jobs(
     )
 
 
-@app.get("/api/audit", response_model=AuditPageOut)
 def list_audit(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
@@ -1524,7 +1493,6 @@ def audit_page_for_user(db: Session, *, telegram_user_id: int, page: int, page_s
     )
 
 
-@app.get("/api/audit/{job_id}/message", response_model=AuditMessageOut)
 async def get_audit_message(
     job_id: uuid.UUID,
     telegram_user_id: int = Depends(require_user),
@@ -1590,7 +1558,6 @@ async def audit_message_for_user(db: Session, *, telegram_user_id: int, job_id: 
     )
 
 
-@app.get("/api/admin/users/{telegram_user_id}/audit", response_model=AuditPageOut)
 def admin_list_user_audit(
     telegram_user_id: int,
     page: int = Query(default=1, ge=1),
@@ -1601,7 +1568,6 @@ def admin_list_user_audit(
     return audit_page_for_user(db, telegram_user_id=telegram_user_id, page=page, page_size=page_size)
 
 
-@app.get("/api/admin/users/{telegram_user_id}/audit/{job_id}/message", response_model=AuditMessageOut)
 async def admin_get_user_audit_message(
     telegram_user_id: int,
     job_id: uuid.UUID,
@@ -1631,7 +1597,6 @@ def admin_user_out(db: Session, telegram_user_id: int) -> AdminUserOut:
     )
 
 
-@app.get("/api/admin/users", response_model=AdminUserPageOut)
 def admin_list_users(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -1678,7 +1643,6 @@ def admin_list_users(
     )
 
 
-@app.patch("/api/admin/users/{telegram_user_id}", response_model=AdminUserOut)
 def admin_update_user(
     telegram_user_id: int,
     payload: AdminUserUpdate,
@@ -1706,7 +1670,6 @@ def admin_update_user(
     return admin_user_out(db, telegram_user_id)
 
 
-@app.get("/api/admin/stats", response_model=AdminStatsOut)
 def admin_stats(
     _admin_id: int = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1743,6 +1706,15 @@ def admin_stats(
         users_total=users_total,
         daily_active_users=daily_active_users,
     )
+
+
+def _create_application() -> FastAPI:
+    from autopost_manager.api_routes.application import create_application
+
+    return create_application()
+
+
+app = _create_application()
 
 
 def main() -> None:
