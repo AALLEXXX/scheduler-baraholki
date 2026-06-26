@@ -7,13 +7,13 @@ from html import unescape
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
+from autopost_manager.repositories.posts import PostRepository
 
 
 class DraftLimitError(ValueError):
@@ -119,30 +119,15 @@ def validate_message_limits(message: Message, html_body: str) -> None:
 
 
 def find_album_post(db: Session, owner_id: int, media_group_id: str) -> Post | None:
-    return db.scalars(
-        select(Post)
-        .join(PostMedia)
-        .where(Post.created_by_telegram_id == owner_id)
-        .where(Post.status == PostStatus.draft)
-        .where(PostMedia.media_group_id == media_group_id)
-        .order_by(Post.created_at.desc())
-    ).first()
+    return PostRepository(db).find_draft_album(owner_id, media_group_id)
 
 
 def draft_count(db: Session, owner_id: int) -> int:
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(Post)
-            .where(Post.created_by_telegram_id == owner_id)
-            .where(Post.status == PostStatus.draft)
-        )
-        or 0
-    )
+    return PostRepository(db).count_drafts_for_owner(owner_id)
 
 
 def media_count(db: Session, post_id) -> int:
-    return int(db.scalar(select(func.count(PostMedia.id)).where(PostMedia.post_id == post_id)) or 0)
+    return PostRepository(db).count_media(post_id)
 
 
 def save_message_as_draft(message: Message) -> tuple[Post, bool]:
@@ -157,6 +142,7 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
     media_group_id = message.media_group_id
 
     with SessionLocal() as db:
+        posts = PostRepository(db)
         post = find_album_post(db, owner_id, media_group_id) if media_group_id else None
         created = post is None
 
@@ -185,16 +171,12 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
         if media:
             if media_count(db, post.id) >= get_settings().max_media_items_per_post:
                 raise DraftLimitError("Слишком много медиа в одном черновике.")
-            existing_media = db.scalars(
-                select(PostMedia)
-                .where(PostMedia.post_id == post.id)
-                .where(PostMedia.source_bot_chat_id == message.chat.id)
-                .where(PostMedia.source_bot_message_id == message.message_id)
-            ).first()
+            existing_media = posts.fetch_media_by_source(
+                post_id=post.id,
+                source_bot_chat_id=message.chat.id,
+                source_bot_message_id=message.message_id,
+            )
             if not existing_media:
-                order_index = db.scalar(
-                    select(func.count(PostMedia.id)).where(PostMedia.post_id == post.id)
-                )
                 db.add(
                     PostMedia(
                         post_id=post.id,
@@ -204,7 +186,7 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
                         media_type=media[0],
                         file_id=media[1],
                         file_unique_id=media[2],
-                        order_index=int(order_index or 0),
+                        order_index=posts.count_media(post.id),
                     )
                 )
 
@@ -215,7 +197,7 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
 
 def save_ack_message(post_id, ack_message: Message) -> None:
     with SessionLocal() as db:
-        post = db.get(Post, post_id)
+        post = PostRepository(db).fetch_by_id(post_id)
         if not post:
             return
         post.ack_bot_chat_id = ack_message.chat.id

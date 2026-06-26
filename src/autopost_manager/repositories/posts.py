@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from autopost_manager.models import Post, PostStatus, PostTarget
+from autopost_manager.models import Post, PostMedia, PostStatus, PostTarget
 
 
 class PostRepository:
@@ -42,6 +42,44 @@ class PostRepository:
             )
             or 0
         )
+
+    def find_draft_album(self, owner_telegram_id: int, media_group_id: str) -> Post | None:
+        return self.db.scalars(
+            select(Post)
+            .join(PostMedia)
+            .where(Post.created_by_telegram_id == owner_telegram_id)
+            .where(Post.status == PostStatus.draft)
+            .where(PostMedia.media_group_id == media_group_id)
+            .order_by(Post.created_at.desc())
+        ).first()
+
+    def count_drafts_for_owner(self, owner_telegram_id: int) -> int:
+        return int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(Post)
+                .where(Post.created_by_telegram_id == owner_telegram_id)
+                .where(Post.status == PostStatus.draft)
+            )
+            or 0
+        )
+
+    def count_media(self, post_id: UUID) -> int:
+        return int(self.db.scalar(select(func.count(PostMedia.id)).where(PostMedia.post_id == post_id)) or 0)
+
+    def fetch_media_by_source(
+        self,
+        *,
+        post_id: UUID,
+        source_bot_chat_id: int,
+        source_bot_message_id: int,
+    ) -> PostMedia | None:
+        return self.db.scalars(
+            select(PostMedia)
+            .where(PostMedia.post_id == post_id)
+            .where(PostMedia.source_bot_chat_id == source_bot_chat_id)
+            .where(PostMedia.source_bot_message_id == source_bot_message_id)
+        ).first()
 
     def pause_scheduled_for_owner(self, owner_telegram_id: int) -> int:
         posts = list(
