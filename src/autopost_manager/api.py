@@ -56,7 +56,6 @@ from autopost_manager.schemas import (
     DeletePostOut,
     DialogFolderOut,
     PostCreate,
-    PostMediaOut,
     PostOut,
     PostResumeUpdate,
     PostScheduleUpdate,
@@ -69,7 +68,6 @@ from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.repositories.rate_limits import RateLimitRepository
 from autopost_manager.repositories.user_settings import UserSettingsRepository
-from autopost_manager.schedule import WeekdaySet
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.services.admin import AdminService
 from autopost_manager.services.admin import day_start as admin_day_start
@@ -80,6 +78,12 @@ from autopost_manager.services.audit import AuditService
 from autopost_manager.services.audit import telegram_message_link as audit_telegram_message_link
 from autopost_manager.services.account import AccountService
 from autopost_manager.services.chats import ChatService
+from autopost_manager.services.posts import PostService
+from autopost_manager.services.posts import as_aware as post_as_aware
+from autopost_manager.services.posts import parse_schedule_weekdays as post_parse_schedule_weekdays
+from autopost_manager.services.posts import post_to_out as service_post_to_out
+from autopost_manager.services.posts import schedule_weekdays_for_storage as post_schedule_weekdays_for_storage
+from autopost_manager.services.posts import serialize_schedule_weekdays as post_serialize_schedule_weekdays
 from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
@@ -255,25 +259,7 @@ class BotMessageDeleteResult:
 
 
 def post_to_out(post: Post) -> PostOut:
-    return PostOut(
-        id=post.id,
-        title=post.title,
-        body=post.body,
-        parse_mode=post.parse_mode,
-        status=post.status,
-        schedule_kind=post.schedule_kind,
-        next_run_at=post.next_run_at,
-        interval_minutes=post.interval_minutes,
-        schedule_weekdays=parse_schedule_weekdays(post.schedule_weekdays),
-        timezone=post.timezone,
-        session_strategy=post.session_strategy,
-        default_session_id=post.default_session_id,
-        target_chat_ids=[target.target_chat_id for target in post.targets],
-        media=[
-            PostMediaOut.model_validate(media)
-            for media in sorted(post.media_items, key=lambda item: item.order_index)
-        ],
-    )
+    return service_post_to_out(post)
 
 
 def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
@@ -288,17 +274,15 @@ def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
 
 
 def as_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+    return post_as_aware(value)
 
 
 def parse_schedule_weekdays(value: str | None) -> list[int]:
-    return WeekdaySet.parse_storage_value(value).as_list()
+    return post_parse_schedule_weekdays(value)
 
 
 def serialize_schedule_weekdays(values: list[int] | None) -> str | None:
-    return WeekdaySet.from_request(values).serialize_for_storage()
+    return post_serialize_schedule_weekdays(values)
 
 
 def schedule_weekdays_for_storage(
@@ -307,7 +291,7 @@ def schedule_weekdays_for_storage(
 ) -> str | None:
     if schedule_kind != ScheduleKind.custom_weekdays:
         return None
-    return serialize_schedule_weekdays(values)
+    return post_schedule_weekdays_for_storage(schedule_kind, values)
 
 
 def cancel_pending_jobs(post: Post, db: Session) -> int:
@@ -936,11 +920,7 @@ def list_posts(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[PostOut]:
-    if not active_account(telegram_user_id=telegram_user_id, db=db):
-        return []
-
-    posts = PostRepository(db).list_for_owner(telegram_user_id)
-    return [post_to_out(post) for post in posts]
+    return PostService(db=db, settings=get_settings()).list_posts(telegram_user_id=telegram_user_id)
 
 
 def create_post(
@@ -948,40 +928,10 @@ def create_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    if payload.status == PostStatus.scheduled:
-        enforce_active_post_limit(db, telegram_user_id)
-        validate_post_schedule(
-            schedule_kind=payload.schedule_kind,
-            next_run_at=payload.next_run_at,
-            interval_minutes=payload.interval_minutes,
-            schedule_weekdays=payload.schedule_weekdays,
-            spam_risk_acknowledged=payload.spam_risk_acknowledged,
-            default_session_id=payload.default_session_id,
-            target_chat_ids=payload.target_chat_ids,
-        )
-
-    validate_owned_session_and_targets(
+    return PostService(db=db, settings=get_settings()).create_post(
+        payload=payload,
         telegram_user_id=telegram_user_id,
-        session_id=payload.default_session_id,
-        target_chat_ids=payload.target_chat_ids,
-        db=db,
     )
-
-    post_data = payload.model_dump(
-        exclude={"target_chat_ids", "spam_risk_acknowledged", "schedule_weekdays"}
-    )
-    post_data["schedule_weekdays"] = schedule_weekdays_for_storage(
-        payload.schedule_kind,
-        payload.schedule_weekdays,
-    )
-    post = Post(**post_data, created_by_telegram_id=telegram_user_id)
-    db.add(post)
-    db.flush()
-    PostRepository(db).replace_targets(post, payload.target_chat_ids)
-    db.commit()
-    db.refresh(post)
-    return post_to_out(post)
 
 
 def schedule_post(
@@ -990,46 +940,11 @@ def schedule_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    require_active_account(telegram_user_id=telegram_user_id, db=db)
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    enforce_active_post_limit(db, telegram_user_id, current_post=post)
-    if len(post.media_items) > get_settings().max_media_items_per_post:
-        raise HTTPException(status_code=422, detail="Слишком много медиа в одном посте")
-
-    validate_post_schedule(
-        schedule_kind=payload.schedule_kind,
-        next_run_at=payload.next_run_at,
-        interval_minutes=payload.interval_minutes,
-        schedule_weekdays=payload.schedule_weekdays,
-        spam_risk_acknowledged=payload.spam_risk_acknowledged,
-        default_session_id=payload.default_session_id,
-        target_chat_ids=payload.target_chat_ids,
-    )
-    validate_owned_session_and_targets(
+    return PostService(db=db, settings=get_settings()).schedule_post(
+        post_id=post_id,
+        payload=payload,
         telegram_user_id=telegram_user_id,
-        session_id=payload.default_session_id,
-        target_chat_ids=payload.target_chat_ids,
-        db=db,
     )
-
-    post.status = PostStatus.scheduled
-    post.schedule_kind = payload.schedule_kind
-    post.next_run_at = payload.next_run_at
-    post.interval_minutes = payload.interval_minutes
-    post.schedule_weekdays = schedule_weekdays_for_storage(
-        payload.schedule_kind,
-        payload.schedule_weekdays,
-    )
-    post.timezone = payload.timezone
-    post.default_session_id = payload.default_session_id
-    cancel_pending_jobs(post, db)
-    PostRepository(db).replace_targets(post, payload.target_chat_ids)
-    db.commit()
-    db.refresh(post)
-    return post_to_out(post)
 
 
 def pause_post(
@@ -1037,19 +952,10 @@ def pause_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    require_active_account(telegram_user_id=telegram_user_id, db=db)
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    if post.status not in {PostStatus.scheduled, PostStatus.paused}:
-        raise HTTPException(status_code=409, detail="Можно поставить на паузу только пост из очереди")
-
-    post.status = PostStatus.paused
-    cancel_pending_jobs(post, db)
-    db.commit()
-    db.refresh(post)
-    return post_to_out(post)
+    return PostService(db=db, settings=get_settings()).pause_post(
+        post_id=post_id,
+        telegram_user_id=telegram_user_id,
+    )
 
 
 def resume_post(
@@ -1058,23 +964,11 @@ def resume_post(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> PostOut:
-    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    require_active_account(telegram_user_id=telegram_user_id, db=db)
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    if post.status != PostStatus.paused:
-        raise HTTPException(status_code=409, detail="Пост не на паузе")
-
-    next_run_at = payload.next_run_at or post.next_run_at
-    if next_run_at is None or as_aware(next_run_at) <= datetime.now(UTC):
-        raise HTTPException(status_code=422, detail="Выберите новую будущую дату отправки")
-
-    post.next_run_at = next_run_at
-    post.status = PostStatus.scheduled
-    db.commit()
-    db.refresh(post)
-    return post_to_out(post)
+    return PostService(db=db, settings=get_settings()).resume_post(
+        post_id=post_id,
+        payload=payload,
+        telegram_user_id=telegram_user_id,
+    )
 
 
 async def delete_post(
@@ -1120,32 +1014,10 @@ def enqueue_now(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    post = PostRepository(db).fetch_owned(post_id, telegram_user_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    require_active_account(telegram_user_id=telegram_user_id, db=db)
-    require_autopost_enabled(telegram_user_id=telegram_user_id, db=db)
-    if len({target.target_chat_id for target in post.targets}) > get_settings().max_targets_per_post:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Можно выбрать не больше {get_settings().max_targets_per_post} групп на один пост",
-        )
-    enforce_daily_job_creation_limit(db, telegram_user_id, len(post.targets))
-
-    count = 0
-    publish_jobs = PublishJobRepository(db)
-    for target in post.targets:
-        if publish_jobs.active_for_post_target(post_id=post.id, target_chat_id=target.target_chat_id):
-            continue
-        publish_jobs.add_pending(
-            post_id=post.id,
-            target_chat_id=target.target_chat_id,
-            session_id=post.default_session_id,
-            due_at=post.next_run_at or post.created_at,
-        )
-        count += 1
-    db.commit()
-    return {"ok": True, "jobs_created": count}
+    return PostService(db=db, settings=get_settings()).enqueue_now(
+        post_id=post_id,
+        telegram_user_id=telegram_user_id,
+    )
 
 
 def list_jobs(
