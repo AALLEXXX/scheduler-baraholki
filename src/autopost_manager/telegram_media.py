@@ -30,8 +30,7 @@ async def send_files_with_optional_text(
         180,
     )
     if text and not caption:
-        text_message = await telegram_timeout(client.send_message(chat_id, text, parse_mode=parse_mode))
-        return text_message
+        return await telegram_timeout(client.send_message(chat_id, text, parse_mode=parse_mode))
     return sent
 
 

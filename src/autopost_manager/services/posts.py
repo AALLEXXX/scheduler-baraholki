@@ -265,9 +265,13 @@ class PostService:
             raise HTTPException(status_code=403, detail="Пользователь заблокирован администратором")
         if settings and settings.autopost_paused:
             raise HTTPException(status_code=409, detail="Автопостинг на паузе")
-        if settings and settings.daily_send_limit is not None:
-            if sent_since(self.db, telegram_user_id=telegram_user_id, since=day_start()) >= settings.daily_send_limit:
-                raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
+        if (
+            settings
+            and settings.daily_send_limit is not None
+            and sent_since(self.db, telegram_user_id=telegram_user_id, since=day_start())
+            >= settings.daily_send_limit
+        ):
+            raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
 
     def _enforce_active_post_limit(self, telegram_user_id: int, *, current_post: Post | None = None) -> None:
         count = PostRepository(self.db).count_active_scheduled_for_owner(telegram_user_id)

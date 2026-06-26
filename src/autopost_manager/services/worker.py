@@ -172,11 +172,14 @@ class WorkerService:
                 session=session,
             )
             return True
-        if settings and settings.daily_send_limit is not None:
-            if sent_today(self.db, job.post.created_by_telegram_id) >= settings.daily_send_limit:
-                jobs.mark_retry(job, "Daily send limit reached", next_day_start())
-                self.db.commit()
-                return True
+        if (
+            settings
+            and settings.daily_send_limit is not None
+            and sent_today(self.db, job.post.created_by_telegram_id) >= settings.daily_send_limit
+        ):
+            jobs.mark_retry(job, "Daily send limit reached", next_day_start())
+            self.db.commit()
+            return True
         if job.post.media_items and len(job.post.media_items) > self.settings.max_media_items_per_post:
             jobs.mark_failed(job, "Too many media items")
             self.db.commit()

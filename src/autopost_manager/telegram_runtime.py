@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import fcntl
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -77,7 +78,5 @@ async def telegram_timeout(awaitable, timeout_seconds: int | None = None):
 
 
 async def disconnect_client(client) -> None:
-    try:
+    with suppress(Exception):
         await asyncio.wait_for(client.disconnect(), timeout=10)
-    except Exception:
-        pass

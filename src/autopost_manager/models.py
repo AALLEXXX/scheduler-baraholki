@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import enum
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
@@ -24,7 +24,7 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class SessionStatus(str, enum.Enum):
+class SessionStatus(StrEnum):
     credentials_needed = "credentials_needed"
     code_needed = "code_needed"
     password_needed = "password_needed"
@@ -35,14 +35,14 @@ class SessionStatus(str, enum.Enum):
     revoked = "revoked"
 
 
-class PostStatus(str, enum.Enum):
+class PostStatus(StrEnum):
     draft = "draft"
     scheduled = "scheduled"
     paused = "paused"
     archived = "archived"
 
 
-class ScheduleKind(str, enum.Enum):
+class ScheduleKind(StrEnum):
     once = "once"
     interval = "interval"
     daily = "daily"
@@ -53,7 +53,7 @@ class ScheduleKind(str, enum.Enum):
     custom_weekdays = "custom_weekdays"
 
 
-class JobStatus(str, enum.Enum):
+class JobStatus(StrEnum):
     pending = "pending"
     processing = "processing"
     done = "done"
@@ -61,7 +61,7 @@ class JobStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
-class TargetChatType(str, enum.Enum):
+class TargetChatType(StrEnum):
     group = "group"
     supergroup = "supergroup"
     channel = "channel"
@@ -114,7 +114,7 @@ class TelegramSession(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    chats: Mapped[list["TargetChat"]] = relationship(back_populates="session")
+    chats: Mapped[list[TargetChat]] = relationship(back_populates="session")
 
 
 class TargetChat(Base):
@@ -132,7 +132,7 @@ class TargetChat(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     session: Mapped[TelegramSession | None] = relationship(back_populates="chats")
-    posts: Mapped[list["PostTarget"]] = relationship(back_populates="target_chat")
+    posts: Mapped[list[PostTarget]] = relationship(back_populates="target_chat")
 
 
 class Post(Base):
@@ -163,10 +163,10 @@ class Post(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    targets: Mapped[list["PostTarget"]] = relationship(
+    targets: Mapped[list[PostTarget]] = relationship(
         back_populates="post", cascade="all, delete-orphan"
     )
-    media_items: Mapped[list["PostMedia"]] = relationship(
+    media_items: Mapped[list[PostMedia]] = relationship(
         back_populates="post",
         cascade="all, delete-orphan",
         order_by="PostMedia.order_index",

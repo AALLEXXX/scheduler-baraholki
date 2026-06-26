@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 import logging
 import uuid
@@ -345,9 +346,13 @@ def require_autopost_enabled(
         raise HTTPException(status_code=403, detail="Пользователь заблокирован администратором")
     if settings and settings.autopost_paused:
         raise HTTPException(status_code=409, detail="Автопостинг на паузе")
-    if settings and settings.daily_send_limit is not None:
-        if sent_since(db, telegram_user_id=telegram_user_id, since=day_start()) >= settings.daily_send_limit:
-            raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
+    if (
+        settings
+        and settings.daily_send_limit is not None
+        and sent_since(db, telegram_user_id=telegram_user_id, since=day_start())
+        >= settings.daily_send_limit
+    ):
+        raise HTTPException(status_code=429, detail="Достигнут дневной лимит отправки постов")
 
 
 def active_scheduled_posts_count(db: Session, telegram_user_id: int) -> int:
@@ -502,10 +507,8 @@ def delete_session_files(session_path: str | None) -> None:
         return
     path = Path(session_path)
     for candidate in {path, path.with_suffix(".session"), path.with_suffix(".session-journal")}:
-        try:
+        with suppress(OSError):
             candidate.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def health() -> dict[str, object]:

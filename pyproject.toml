@@ -45,6 +45,15 @@ where = ["src"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "C4", "PIE", "RET"]
+ignore = [
+  # FastAPI intentionally uses Depends(...) in function defaults.
+  "B008",
+  # Existing modules and migrations need a focused wrapping pass.
+  "E501",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

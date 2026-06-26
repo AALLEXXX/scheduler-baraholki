@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Callable
 
 import pytest
 from fastapi.testclient import TestClient
