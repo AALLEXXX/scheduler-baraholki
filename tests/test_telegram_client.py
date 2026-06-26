@@ -378,14 +378,14 @@ def test_send_media_from_session_downloads_temp_files_when_file_id_send_fails(
     assert not temp_file.exists()
 
 
-def test_classify_send_error_marks_flood_wait_session_limited(db_session) -> None:
+def test_classify_send_error_formats_flood_wait_without_session_mutation(db_session) -> None:
     session = make_session(db_session, owner_id=111)
     error = FloodWaitError(request=None, capture=42)
 
-    message = telegram_client.classify_send_error(error, session)
+    message = telegram_client.classify_send_error(error)
 
     assert message == "FloodWait: wait 42 seconds"
-    assert session.status == SessionStatus.limited
+    assert session.status == SessionStatus.active
 
 
 def test_classify_send_error_formats_generic_exception() -> None:

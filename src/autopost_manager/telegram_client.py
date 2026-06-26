@@ -13,12 +13,13 @@ from pathlib import Path
 import aiohttp
 from sqlalchemy.orm import Session
 from telethon import TelegramClient, functions, types, utils
-from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import SQLiteSession, StringSession
 
 from autopost_manager.config import get_settings
 from autopost_manager.crypto import decrypt_session_string, encrypt_session_string
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
+from autopost_manager.send_errors import classify_send_error as format_send_error
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -600,6 +601,10 @@ def folder_chat_ids(folder, dialogs: list[dict[str, object]]) -> list[int]:
     return sorted(selected - exclude_ids)
 
 
+def classify_send_error(exc: Exception) -> str:
+    return format_send_error(exc)
+
+
 async def list_dialog_folders_from_session(session: TelegramSession) -> list[dict[str, object]]:
     async with session_lock(session.session_path):
         client = build_client(session)
@@ -641,26 +646,6 @@ async def list_dialog_folders_from_session(session: TelegramSession) -> list[dic
         finally:
             remember_client_session(session, client)
             await disconnect_client(client)
-
-
-def classify_send_error(exc: Exception, session: TelegramSession | None = None) -> str:
-    if isinstance(exc, FloodWaitError):
-        if session:
-            session.status = SessionStatus.limited
-        return f"FloodWait: wait {exc.seconds} seconds"
-    error_name = exc.__class__.__name__
-    lowered = f"{error_name} {exc}".lower()
-    if (
-        "writeforbidden" in lowered
-        or "userbannedinchannel" in lowered
-        or "chatadminrequired" in lowered
-        or "chatwriteforbidden" in lowered
-        or "not enough rights" in lowered
-        or "can't write" in lowered
-        or "cannot write" in lowered
-    ):
-        return f"Chat write forbidden: user is banned or not allowed to post in this chat ({error_name}: {exc})"
-    return f"{exc.__class__.__name__}: {exc}"
 
 
 async def list_dialogs_from_session(session: TelegramSession) -> list[dict[str, object]]:

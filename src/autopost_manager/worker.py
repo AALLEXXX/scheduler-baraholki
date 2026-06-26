@@ -11,7 +11,8 @@ from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
-from autopost_manager.telegram_client import classify_send_error, send_post_from_session
+from autopost_manager.send_errors import classify_send_error_info
+from autopost_manager.telegram_client import send_post_from_session
 
 PROCESSING_TIMEOUT_SECONDS = 10 * 60
 MAX_JOB_ATTEMPTS = 3
@@ -170,9 +171,12 @@ async def process_one_job() -> bool:
                 post=job.post,
             )
         except Exception as exc:
-            error = classify_send_error(exc, session)
+            send_error = classify_send_error_info(exc)
+            error = send_error.message
+            if send_error.limited:
+                session.status = SessionStatus.limited
             delay = retry_delay(exc, job.attempts)
-            if delay is None:
+            if delay is None or send_error.terminal:
                 jobs.mark_failed(job, error)
             else:
                 jobs.mark_retry(job, error, datetime.now(UTC) + delay)

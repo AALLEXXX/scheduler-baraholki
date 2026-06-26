@@ -201,6 +201,31 @@ def test_process_one_job_does_not_retry_write_forbidden_errors(monkeypatch, db_s
         assert "Chat write forbidden" in refreshed.last_error
 
 
+def test_process_one_job_marks_session_limited_on_flood_wait(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    async def flood_wait_send_post_from_session(*_args, **_kwargs):
+        from telethon.errors import FloodWaitError
+
+        raise FloodWaitError(request=None, capture=42)
+
+    monkeypatch.setattr(worker, "send_post_from_session", flood_wait_send_post_from_session)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    with SessionLocal() as db:
+        refreshed_job = db.get(PublishJob, job.id)
+        refreshed_session = db.get(type(session), session.id)
+        assert refreshed_job.status == JobStatus.pending
+        assert refreshed_job.next_attempt_at is not None
+        assert refreshed_session.status == SessionStatus.limited
+
+
 def test_process_one_job_sends_alert_with_job_context(monkeypatch, db_session) -> None:
     session = make_session(db_session, owner_id=111, username="alice")
     chat = make_chat(db_session, session, title="Target Chat", telegram_chat_id=-1001)
