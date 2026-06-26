@@ -11,19 +11,6 @@ import uvicorn
 from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from telethon.errors import (
-    FloodWaitError,
-    PasswordHashInvalidError,
-    PhoneCodeEmptyError,
-    PhoneCodeExpiredError,
-    PhoneCodeInvalidError,
-    PhoneNumberBannedError,
-    PhoneNumberFloodError,
-    PhoneNumberInvalidError,
-    PhonePasswordFloodError,
-    SendCodeUnavailableError,
-)
-
 from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
 from autopost_manager.db import get_db
@@ -33,7 +20,6 @@ from autopost_manager.models import (
     PostStatus,
     PublishJob,
     ScheduleKind,
-    SessionStatus,
     TargetChat,
     TelegramSession,
     UserSettings,
@@ -65,7 +51,6 @@ from autopost_manager.repositories.target_chats import TargetChatRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
-from autopost_manager.repositories.rate_limits import RateLimitRepository
 from autopost_manager.repositories.user_settings import UserSettingsRepository
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.services.admin import AdminService
@@ -76,6 +61,11 @@ from autopost_manager.services.admin import sent_since as admin_sent_since
 from autopost_manager.services.audit import AuditService
 from autopost_manager.services.audit import telegram_message_link as audit_telegram_message_link
 from autopost_manager.services.account import AccountService
+from autopost_manager.services.account import login_code_message as account_login_code_message
+from autopost_manager.services.account import login_error_detail as account_login_error_detail
+from autopost_manager.services.account import normalize_phone_key as account_normalize_phone_key
+from autopost_manager.services.account import phone_digits as account_phone_digits
+from autopost_manager.services.account import remaining_login_code_cooldown as account_remaining_login_code_cooldown
 from autopost_manager.services.chats import ChatService
 from autopost_manager.services.posts import PostService
 from autopost_manager.services.posts import as_aware as post_as_aware
@@ -156,80 +146,24 @@ async def security_headers(request, call_next):
 
 
 def login_error_detail(stage: str, exc: Exception) -> str:
-    if isinstance(exc, FloodWaitError):
-        return f"Telegram временно ограничил попытки. Попробуйте через {exc.seconds} сек."
-    if isinstance(exc, PhoneNumberFloodError):
-        return "Telegram временно ограничил отправку кодов на этот номер. Попробуйте позже."
-    if isinstance(exc, PhonePasswordFloodError):
-        return "Telegram временно ограничил попытки ввода 2FA-пароля. Попробуйте позже."
-    if isinstance(exc, PhoneNumberInvalidError):
-        return "Telegram не принял номер. Проверьте формат: номер должен быть с кодом страны, например +995..."
-    if isinstance(exc, PhoneNumberBannedError):
-        return "Telegram не разрешает вход для этого номера: аккаунт заблокирован или ограничен."
-    if isinstance(exc, (PhoneCodeEmptyError, PhoneCodeInvalidError)):
-        return "Telegram не принял код. Проверьте код и попробуйте ещё раз."
-    if isinstance(exc, PhoneCodeExpiredError):
-        return "Код Telegram истёк. Нажмите «Получить код» ещё раз."
-    if isinstance(exc, SendCodeUnavailableError):
-        return "Telegram не даёт отправить SMS для этого номера сейчас. Проверьте код в Telegram-приложении или попробуйте позже."
-    if isinstance(exc, PasswordHashInvalidError):
-        return "Telegram не принял пароль 2FA. Нужен облачный пароль из настроек Telegram, не код из сообщения."
-    prefix = {
-        "start-login": "Не удалось отправить код Telegram",
-        "confirm-code": "Не удалось подтвердить код Telegram",
-        "confirm-password": "Не удалось подтвердить пароль 2FA",
-    }.get(stage, "Telegram вернул ошибку")
-    return f"{prefix}. Попробуйте позже или проверьте данные."
+    return account_login_error_detail(stage, exc)
 
 
 def login_code_message(delivery_type: str | None, *, force_sms: bool) -> str:
-    if delivery_type == "SentCodeTypeSms":
-        return "Telegram отправил код по SMS."
-    if delivery_type == "SentCodeTypeCall":
-        return "Telegram отправит код звонком."
-    if delivery_type == "SentCodeTypeFlashCall":
-        return "Telegram отправит код через flash-call."
-    if delivery_type == "SentCodeTypeApp":
-        return "Telegram отправил код в Telegram-приложение или служебный чат на активном устройстве, не по SMS."
-    if force_sms:
-        return "Запросили SMS-код. Если Telegram разрешил SMS, код придёт на номер."
-    return "Telegram принял запрос на код. Если SMS не пришла, проверьте Telegram-приложение на других устройствах."
+    return account_login_code_message(delivery_type, force_sms=force_sms)
 
 
 def remaining_login_code_cooldown(session: TelegramSession) -> int:
-    if not session.last_code_requested_at:
-        return 0
-    last_requested = session.last_code_requested_at
-    if last_requested.tzinfo is None:
-        last_requested = last_requested.replace(tzinfo=UTC)
-    elapsed = datetime.now(UTC) - last_requested
-    remaining = timedelta(seconds=LOGIN_CODE_COOLDOWN_SECONDS) - elapsed
-    return max(0, int(remaining.total_seconds()))
+    return account_remaining_login_code_cooldown(session)
 
 
 async def raise_login_error(stage: str, session: TelegramSession, exc: Exception) -> None:
-    logger.warning(
-        "Telegram login failed: stage=%s session_id=%s owner=%s error_type=%s error=%s",
-        stage,
-        session.id,
-        session.owner_telegram_id,
-        type(exc).__name__,
-        exc,
+    await AccountService(db=None).raise_login_error(
+        stage=stage,
+        session=session,
+        exc=exc,
+        send_alert=send_alert,
     )
-    await send_alert(
-        title="Telegram login error",
-        status="422",
-        fields={
-            "action": stage,
-            "owner_telegram_id": session.owner_telegram_id,
-            "session_id": session.id,
-            "session_status": session.status.value,
-            "phone": mask_phone(session.phone),
-            "error_type": type(exc).__name__,
-            "error": login_error_detail(stage, exc),
-        },
-    )
-    raise HTTPException(status_code=422, detail=login_error_detail(stage, exc)) from exc
 
 
 def validate_runtime_settings() -> None:
@@ -369,44 +303,28 @@ def check_rate_limit(
     limit: int,
     window_seconds: int,
 ) -> None:
-    now = datetime.now(UTC)
-    cutoff = now - timedelta(seconds=window_seconds)
-    rate_limits = RateLimitRepository(db)
-    rate_limits.delete_older_than(scope=scope, cutoff=cutoff)
-    count = rate_limits.count_since(scope=scope, key=key, since=cutoff)
-    if count >= limit:
-        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
-    rate_limits.add_event(scope=scope, key=key, created_at=now)
+    AccountService(db).check_rate_limit(
+        scope=scope,
+        key=key,
+        limit=limit,
+        window_seconds=window_seconds,
+    )
 
 
 def normalize_phone_key(phone: str) -> str:
-    digits = phone_digits(phone)
-    return digits[-12:] if digits else "unknown"
+    return account_normalize_phone_key(phone)
 
 
 def phone_digits(phone: str | None) -> str:
-    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return account_phone_digits(phone)
 
 
 def find_session_by_phone(db: Session, *, owner_telegram_id: int, phone: str) -> TelegramSession | None:
-    target_digits = phone_digits(phone)
-    if not target_digits:
-        return None
-    sessions = TelegramSessionRepository(db).list_for_owner(owner_telegram_id)
-    return next((session for session in sessions if phone_digits(session.phone) == target_digits), None)
+    return AccountService(db).find_session_by_phone(owner_telegram_id=owner_telegram_id, phone=phone)
 
 
 def unique_session_name(db: Session, *, owner_telegram_id: int, safe_phone: str) -> str:
-    sessions = TelegramSessionRepository(db)
-    base_name = f"tg_{owner_telegram_id}_{safe_phone or 'account'}"
-    if not sessions.name_exists(base_name):
-        return base_name
-
-    for index in range(2, 100):
-        candidate = f"{base_name}_{index}"
-        if not sessions.name_exists(candidate):
-            return candidate
-    return f"{base_name}_{uuid.uuid4().hex[:8]}"
+    return AccountService(db).unique_session_name(owner_telegram_id=owner_telegram_id, safe_phone=safe_phone)
 
 
 def sent_since(db: Session, *, telegram_user_id: int | None = None, since: datetime | None = None) -> int:
@@ -629,76 +547,12 @@ async def start_account_login(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    settings = get_settings()
-    check_rate_limit(
-        db,
-        scope="login:start",
-        key=f"{telegram_user_id}:{normalize_phone_key(payload.phone)}",
-        limit=RATE_LIMIT_LOGIN_START_ATTEMPTS,
-        window_seconds=RATE_LIMIT_LOGIN_START_WINDOW_SECONDS,
-    )
-    safe_phone = phone_digits(payload.phone)
-    session = find_session_by_phone(db, owner_telegram_id=telegram_user_id, phone=payload.phone)
-    if not session:
-        if user_sessions_count(db, telegram_user_id) >= settings.max_sessions_per_user:
-            raise HTTPException(status_code=429, detail="Достигнут лимит Telegram-аккаунтов")
-        session_name = unique_session_name(db, owner_telegram_id=telegram_user_id, safe_phone=safe_phone)
-        session_path = str(settings.telegram_sessions_dir / session_name)
-        session = TelegramSession(
-            owner_telegram_id=telegram_user_id,
-            name=session_name,
-            phone=payload.phone,
-            api_id=settings.telegram_api_id,
-            api_hash=settings.telegram_api_hash,
-            session_path=session_path,
-            status=SessionStatus.credentials_needed,
-            min_send_interval_seconds=settings.default_min_send_interval_seconds,
-        )
-        db.add(session)
-        db.flush()
-    else:
-        session.phone = payload.phone
-        session.api_id = settings.telegram_api_id
-        session.api_hash = settings.telegram_api_hash
-        session_name = session.name or unique_session_name(db, owner_telegram_id=telegram_user_id, safe_phone=safe_phone)
-        session_path = str(settings.telegram_sessions_dir / session_name)
-        session.name = session.name or session_name
-        session.session_path = session.session_path or session_path
-
-    cooldown_seconds = remaining_login_code_cooldown(session)
-    if cooldown_seconds:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Повторно запросить код можно через {cooldown_seconds} сек.",
-        )
-    db.commit()
-
-    try:
-        code_request = await request_login_code(session, force_sms=payload.force_sms)
-    except Exception as exc:
-        session.phone_code_hash = None
-        db.commit()
-        await raise_login_error("start-login", session, exc)
-
-    session.phone_code_hash = code_request.phone_code_hash
-    session.status = SessionStatus.code_needed
-    session.last_code_requested_at = datetime.now(UTC)
-    logger.warning(
-        "Telegram login code requested: session_id=%s owner=%s delivery_type=%s next_delivery_type=%s force_sms=%s timeout=%s",
-        session.id,
-        session.owner_telegram_id,
-        code_request.delivery_type,
-        code_request.next_delivery_type,
-        payload.force_sms,
-        code_request.timeout,
-    )
-    db.commit()
-    return AccountLoginOut(
-        session_id=session.id,
-        status=session.status,
-        message=login_code_message(code_request.delivery_type, force_sms=payload.force_sms),
-        delivery_type=code_request.delivery_type,
-        next_delivery_type=code_request.next_delivery_type,
+    return await AccountService(db).start_login(
+        payload=payload,
+        telegram_user_id=telegram_user_id,
+        settings=get_settings(),
+        request_login_code=request_login_code,
+        send_alert=send_alert,
     )
 
 
@@ -707,40 +561,12 @@ async def confirm_account_code(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    session = TelegramSessionRepository(db).fetch_owned(payload.session_id, telegram_user_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Telegram account not found")
-    check_rate_limit(
-        db,
-        scope="login:code",
-        key=str(session.id),
-        limit=RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS,
-        window_seconds=RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS,
+    return await AccountService(db).confirm_code(
+        payload=payload,
+        telegram_user_id=telegram_user_id,
+        confirm_login_code=confirm_login_code,
+        send_alert=send_alert,
     )
-
-    try:
-        completed, me = await confirm_login_code(session, payload.code)
-    except Exception as exc:
-        session.phone_code_hash = None
-        db.commit()
-        await raise_login_error("confirm-code", session, exc)
-
-    if not completed:
-        session.status = SessionStatus.password_needed
-        db.commit()
-        return AccountLoginOut(
-            session_id=session.id,
-            status=session.status,
-            message="Two-step verification is enabled. Enter your Telegram password.",
-        )
-
-    session.telegram_user_id = me.id
-    session.username = me.username
-    session.status = SessionStatus.active
-    session.phone_code_hash = None
-    user_settings(telegram_user_id=telegram_user_id, db=db).autopost_paused = False
-    db.commit()
-    return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
 async def confirm_account_password(
@@ -748,31 +574,12 @@ async def confirm_account_password(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    session = TelegramSessionRepository(db).fetch_owned(payload.session_id, telegram_user_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Telegram account not found")
-    check_rate_limit(
-        db,
-        scope="login:password",
-        key=str(session.id),
-        limit=RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS,
-        window_seconds=RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS,
+    return await AccountService(db).confirm_password(
+        payload=payload,
+        telegram_user_id=telegram_user_id,
+        confirm_login_password=confirm_login_password,
+        send_alert=send_alert,
     )
-
-    try:
-        me = await confirm_login_password(session, payload.password)
-    except Exception as exc:
-        session.phone_code_hash = None
-        db.commit()
-        await raise_login_error("confirm-password", session, exc)
-
-    session.telegram_user_id = me.id
-    session.username = me.username
-    session.status = SessionStatus.active
-    session.phone_code_hash = None
-    user_settings(telegram_user_id=telegram_user_id, db=db).autopost_paused = False
-    db.commit()
-    return AccountLoginOut(session_id=session.id, status=session.status, message="Account connected.")
 
 
 def cancel_user_pending_jobs(*, telegram_user_id: int, db: Session) -> int:
