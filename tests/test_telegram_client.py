@@ -10,6 +10,7 @@ from telethon.errors import FloodWaitError, SessionPasswordNeededError
 from telethon.sessions import StringSession
 
 from autopost_manager import telegram_client
+from autopost_manager.db import SessionLocal
 from autopost_manager.models import SessionStatus
 
 from conftest import make_media, make_post, make_session
@@ -145,6 +146,7 @@ def test_send_message_rate_limits_sends_and_updates_session(monkeypatch, db_sess
     )
     session.min_send_interval_seconds = 30
     db_session.commit()
+    previous_last_send_at = session.last_send_at
     fake_client = AuthorizedClient()
     sleeps: list[float] = []
 
@@ -171,6 +173,14 @@ def test_send_message_rate_limits_sends_and_updates_session(monkeypatch, db_sess
     assert sleeps and 19 <= sleeps[0] <= 21
     assert session.status == SessionStatus.active
     assert session.last_send_at is not None
+    with SessionLocal() as db:
+        uncommitted = db.get(type(session), session.id)
+        assert uncommitted.last_send_at == previous_last_send_at.replace(tzinfo=None)
+
+    db_session.commit()
+    with SessionLocal() as db:
+        committed = db.get(type(session), session.id)
+        assert committed.last_send_at != previous_last_send_at.replace(tzinfo=None)
 
 
 def test_send_message_marks_session_as_needing_login_when_unauthorized(

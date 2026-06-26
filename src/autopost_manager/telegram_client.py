@@ -126,7 +126,6 @@ async def send_message_from_session(
         try:
             if not await telegram_timeout(client.is_user_authorized(), 20):
                 session.status = SessionStatus.needs_login
-                db.commit()
                 raise RuntimeError("Telegram session needs login")
             message = await telegram_timeout(
                 client.send_message(chat_id, text, parse_mode=parse_mode),
@@ -137,7 +136,6 @@ async def send_message_from_session(
 
         session.last_send_at = datetime.now(UTC)
         session.status = SessionStatus.active
-        db.commit()
         return int(message.id)
 
 
@@ -191,7 +189,6 @@ async def send_media_from_session(
         try:
             if not await telegram_timeout(client.is_user_authorized(), 20):
                 session.status = SessionStatus.needs_login
-                db.commit()
                 raise RuntimeError("Telegram session needs login")
 
             source_message_ids = []
@@ -246,7 +243,6 @@ async def send_media_from_session(
 
         session.last_send_at = datetime.now(UTC)
         session.status = SessionStatus.active
-        db.commit()
         return extract_sent_message_id(sent)
 
 
