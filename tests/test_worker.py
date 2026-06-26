@@ -160,6 +160,47 @@ def test_process_one_job_records_send_error(monkeypatch, db_session) -> None:
         assert refreshed.next_attempt_at is not None
 
 
+def test_recover_stale_processing_jobs_moves_job_back_to_pending(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    job.status = JobStatus.processing
+    job.locked_until = datetime.now(UTC) - timedelta(minutes=1)
+    db_session.commit()
+
+    recovered = worker.recover_stale_processing_jobs(db_session, datetime.now(UTC))
+
+    assert recovered == 1
+    assert job.status == JobStatus.pending
+    assert job.locked_until is None
+    assert job.next_attempt_at is not None
+    assert job.last_error == "Recovered stale processing job"
+
+
+def test_process_one_job_does_not_retry_write_forbidden_errors(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    async def forbidden_send_post_from_session(*_args, **_kwargs):
+        raise RuntimeError("Chat write forbidden: user is banned or not allowed to post")
+
+    monkeypatch.setattr(worker, "send_post_from_session", forbidden_send_post_from_session)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    with SessionLocal() as db:
+        refreshed = db.get(PublishJob, job.id)
+        assert refreshed.status == JobStatus.failed
+        assert refreshed.attempts == 1
+        assert refreshed.next_attempt_at is None
+        assert "Chat write forbidden" in refreshed.last_error
+
+
 def test_process_one_job_sends_alert_with_job_context(monkeypatch, db_session) -> None:
     session = make_session(db_session, owner_id=111, username="alice")
     chat = make_chat(db_session, session, title="Target Chat", telegram_chat_id=-1001)

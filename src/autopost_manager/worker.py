@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from telethon.errors import FloodWaitError
 
 from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
 from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
+from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.telegram_client import classify_send_error, send_post_from_session
 
 PROCESSING_TIMEOUT_SECONDS = 10 * 60
@@ -93,22 +94,10 @@ def next_day_start() -> datetime:
 
 
 def recover_stale_processing_jobs(db, now: datetime) -> int:
-    stale_jobs = list(
-        db.scalars(
-            select(PublishJob)
-            .where(PublishJob.status == JobStatus.processing)
-            .where(
-                (PublishJob.locked_until.is_not(None) & (PublishJob.locked_until < now))
-                | (PublishJob.updated_at < now - timedelta(seconds=PROCESSING_TIMEOUT_SECONDS))
-            )
-        )
+    return PublishJobRepository(db).recover_expired_processing_jobs(
+        now,
+        timeout_seconds=PROCESSING_TIMEOUT_SECONDS,
     )
-    for job in stale_jobs:
-        job.status = JobStatus.pending
-        job.locked_until = None
-        job.next_attempt_at = now
-        job.last_error = "Recovered stale processing job"
-    return len(stale_jobs)
 
 
 def retry_delay(exc: Exception, attempts: int) -> timedelta | None:
@@ -121,74 +110,54 @@ def retry_delay(exc: Exception, attempts: int) -> timedelta | None:
     message = str(exc).lower()
     if "needs login" in message or "unauthorized" in message:
         return None
+    if (
+        "write forbidden" in message
+        or "user is banned" in message
+        or "not allowed to post" in message
+        or "chatadminrequired" in message
+        or "chat write forbidden" in message
+    ):
+        return None
     return timedelta(seconds=min(900, 60 * attempts))
 
 
 async def process_one_job() -> bool:
     now = datetime.now(UTC)
     with SessionLocal() as db:
-        recover_stale_processing_jobs(db, now)
-        blocked_owner_exists = exists().where(
-            UserSettings.telegram_user_id == Post.created_by_telegram_id,
-            (UserSettings.autopost_paused.is_(True)) | (UserSettings.banned.is_(True)),
-        )
-        job = db.scalars(
-            select(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(PublishJob.status == JobStatus.pending)
-            .where(PublishJob.due_at <= now)
-            .where((PublishJob.next_attempt_at.is_(None)) | (PublishJob.next_attempt_at <= now))
-            .where(~blocked_owner_exists)
-            .order_by(PublishJob.due_at)
-            .limit(1)
-            .with_for_update(skip_locked=True, of=PublishJob)
-        ).first()
+        jobs = PublishJobRepository(db)
+        jobs.recover_expired_processing_jobs(now, timeout_seconds=PROCESSING_TIMEOUT_SECONDS)
+        job = jobs.claim_next_due_job(now, lease_seconds=PROCESSING_TIMEOUT_SECONDS)
         if not job:
             return False
 
-        job.status = JobStatus.processing
-        job.attempts += 1
-        job.locked_until = now + timedelta(seconds=PROCESSING_TIMEOUT_SECONDS)
-        job.next_attempt_at = None
         db.commit()
         db.refresh(job)
 
         session = choose_session(db, job)
         if not session:
-            job.status = JobStatus.failed
-            job.last_error = "No active session selected for job"
-            job.locked_until = None
+            jobs.mark_failed(job, "No active session selected for job")
             db.commit()
             await alert_job_issue(job, action="send_post", status="failed", error=job.last_error)
             return True
 
         settings = owner_settings(db, job.post.created_by_telegram_id)
         if settings and settings.banned:
-            job.status = JobStatus.failed
-            job.last_error = "User is banned by administrator"
-            job.locked_until = None
+            jobs.mark_failed(job, "User is banned by administrator")
             db.commit()
             await alert_job_issue(job, action="send_post", status="failed", error=job.last_error, session=session)
             return True
         if settings and settings.autopost_paused:
-            job.status = JobStatus.cancelled
-            job.last_error = "Autoposting paused by user"
-            job.locked_until = None
+            jobs.mark_cancelled(job, "Autoposting paused by user")
             db.commit()
             await alert_job_issue(job, action="send_post", status="cancelled", error=job.last_error, session=session)
             return True
         if settings and settings.daily_send_limit is not None:
             if sent_today(db, job.post.created_by_telegram_id) >= settings.daily_send_limit:
-                job.status = JobStatus.pending
-                job.last_error = "Daily send limit reached"
-                job.locked_until = None
-                job.next_attempt_at = next_day_start()
+                jobs.mark_retry(job, "Daily send limit reached", next_day_start())
                 db.commit()
                 return True
         if job.post.media_items and len(job.post.media_items) > get_settings().max_media_items_per_post:
-            job.status = JobStatus.failed
-            job.last_error = "Too many media items"
-            job.locked_until = None
+            jobs.mark_failed(job, "Too many media items")
             db.commit()
             await alert_job_issue(job, action="send_post", status="failed", error=job.last_error, session=session)
             return True
@@ -201,24 +170,17 @@ async def process_one_job() -> bool:
                 post=job.post,
             )
         except Exception as exc:
-            job.last_error = classify_send_error(exc, session)
+            error = classify_send_error(exc, session)
             delay = retry_delay(exc, job.attempts)
-            job.locked_until = None
             if delay is None:
-                job.status = JobStatus.failed
-                job.next_attempt_at = None
+                jobs.mark_failed(job, error)
             else:
-                job.status = JobStatus.pending
-                job.next_attempt_at = datetime.now(UTC) + delay
+                jobs.mark_retry(job, error, datetime.now(UTC) + delay)
             db.commit()
             await alert_job_issue(job, action="send_post", status=job.status.value, error=job.last_error, session=session)
             return True
 
-        job.status = JobStatus.done
-        job.telegram_message_id = message_id
-        job.last_error = None
-        job.locked_until = None
-        job.next_attempt_at = None
+        jobs.mark_done(job, message_id)
         db.commit()
         return True
 
