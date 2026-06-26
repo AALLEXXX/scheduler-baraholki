@@ -3,12 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
-from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
+from autopost_manager.models import Post, PostStatus, ScheduleKind
+from autopost_manager.repositories.posts import PostRepository
+from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.schedule import (
     WeekdaySet,
     advance_by_days_until_future,
@@ -50,54 +51,33 @@ class SchedulerService:
         day_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
         created = 0
         with self.db_factory() as db:
-            blocked_owner_exists = exists().where(
-                UserSettings.telegram_user_id == Post.created_by_telegram_id,
-                (UserSettings.autopost_paused.is_(True)) | (UserSettings.banned.is_(True)),
-            )
-            posts = db.scalars(
-                select(Post)
-                .where(Post.status == PostStatus.scheduled)
-                .where(Post.next_run_at.is_not(None))
-                .where(Post.next_run_at <= current_time)
-                .where(~blocked_owner_exists)
-                .with_for_update(skip_locked=True, of=Post)
-            ).unique()
+            posts = PostRepository(db)
+            jobs = PublishJobRepository(db)
 
-            for post in posts:
+            for post in posts.list_due_scheduled_unblocked(current_time):
                 if len({target.target_chat_id for target in post.targets}) > get_settings().max_targets_per_post:
                     post.status = PostStatus.paused
                     continue
                 owner_id = post.created_by_telegram_id
                 if owner_id is not None:
-                    today_jobs = int(
-                        db.scalar(
-                            select(func.count())
-                            .select_from(PublishJob)
-                            .join(Post, PublishJob.post_id == Post.id)
-                            .where(Post.created_by_telegram_id == owner_id)
-                            .where(PublishJob.created_at >= day_start)
-                        )
-                        or 0
+                    today_jobs = jobs.count_created_since_for_owner(
+                        owner_telegram_id=owner_id,
+                        since=day_start,
                     )
                     if today_jobs >= get_settings().max_jobs_per_user_per_day:
                         post.next_run_at = current_time + timedelta(hours=1)
                         continue
                 for target in post.targets:
-                    existing = db.scalars(
-                        select(PublishJob)
-                        .where(PublishJob.post_id == post.id)
-                        .where(PublishJob.target_chat_id == target.target_chat_id)
-                        .where(PublishJob.status.in_([JobStatus.pending, JobStatus.processing]))
-                    ).first()
-                    if existing:
+                    if jobs.active_for_post_target(
+                        post_id=post.id,
+                        target_chat_id=target.target_chat_id,
+                    ):
                         continue
-                    db.add(
-                        PublishJob(
-                            post_id=post.id,
-                            target_chat_id=target.target_chat_id,
-                            session_id=post.default_session_id,
-                            due_at=current_time,
-                        )
+                    jobs.add_pending(
+                        post_id=post.id,
+                        target_chat_id=target.target_chat_id,
+                        session_id=post.default_session_id,
+                        due_at=current_time,
                     )
                     created += 1
 

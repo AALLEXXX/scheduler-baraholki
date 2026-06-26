@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
-from autopost_manager.models import Post, PostMedia, PostStatus, PostTarget
+from autopost_manager.models import Post, PostMedia, PostStatus, PostTarget, UserSettings
 
 
 class PostRepository:
@@ -27,6 +27,24 @@ class PostRepository:
                 select(Post)
                 .where(Post.created_by_telegram_id == owner_telegram_id)
                 .order_by(Post.created_at.desc())
+            )
+            .unique()
+            .all()
+        )
+
+    def list_due_scheduled_unblocked(self, now) -> list[Post]:
+        blocked_owner_exists = exists().where(
+            UserSettings.telegram_user_id == Post.created_by_telegram_id,
+            (UserSettings.autopost_paused.is_(True)) | (UserSettings.banned.is_(True)),
+        )
+        return (
+            self.db.scalars(
+                select(Post)
+                .where(Post.status == PostStatus.scheduled)
+                .where(Post.next_run_at.is_not(None))
+                .where(Post.next_run_at <= now)
+                .where(~blocked_owner_exists)
+                .with_for_update(skip_locked=True, of=Post)
             )
             .unique()
             .all()
