@@ -1,12 +1,34 @@
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
+from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
+import uuid
 
 from pydantic import BaseModel, Field, field_validator
 
 from autopost_manager.models import JobStatus, PostStatus, ScheduleKind, SessionStatus, TargetChatType
+
+MAX_TARGET_CHAT_IDS = 15
+MAX_SCHEDULE_WEEKDAYS = 7
+ParseMode = Literal["html"]
+SessionStrategy = Literal["fixed"]
+
+
+def normalize_schedule_weekdays(values: list[int]) -> list[int]:
+    invalid = [value for value in values if value < 0 or value > 6]
+    if invalid:
+        raise ValueError("Дни недели должны быть числами от 0 до 6")
+    return sorted(set(values))
+
+
+def ensure_timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("Укажите корректную IANA timezone") from exc
+    return value
 
 
 class TelegramSessionOut(BaseModel):
@@ -90,28 +112,62 @@ class DialogFolderOut(BaseModel):
 class PostCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=4096)
-    parse_mode: str | None = "html"
+    parse_mode: ParseMode | None = "html"
     status: PostStatus = PostStatus.draft
     schedule_kind: ScheduleKind = ScheduleKind.once
     next_run_at: datetime | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
-    schedule_weekdays: list[int] = Field(default_factory=list)
+    schedule_weekdays: list[int] = Field(default_factory=list, max_length=MAX_SCHEDULE_WEEKDAYS)
     timezone: str = "Asia/Tbilisi"
-    session_strategy: str = "fixed"
+    session_strategy: SessionStrategy = "fixed"
     default_session_id: uuid.UUID | None = None
     target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
     spam_risk_acknowledged: bool = False
+
+    @field_validator("schedule_weekdays")
+    @classmethod
+    def validate_schedule_weekdays(cls, values: list[int]) -> list[int]:
+        return normalize_schedule_weekdays(values)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        return ensure_timezone(value)
+
+    @field_validator("target_chat_ids")
+    @classmethod
+    def validate_target_chat_ids(cls, values: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(values)) > MAX_TARGET_CHAT_IDS:
+            raise ValueError(f"Можно выбрать не больше {MAX_TARGET_CHAT_IDS} групп на один пост")
+        return values
 
 
 class PostScheduleUpdate(BaseModel):
     schedule_kind: ScheduleKind = ScheduleKind.once
     next_run_at: datetime | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
-    schedule_weekdays: list[int] = Field(default_factory=list)
+    schedule_weekdays: list[int] = Field(default_factory=list, max_length=MAX_SCHEDULE_WEEKDAYS)
     timezone: str = "Asia/Tbilisi"
     default_session_id: uuid.UUID
     target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
     spam_risk_acknowledged: bool = False
+
+    @field_validator("schedule_weekdays")
+    @classmethod
+    def validate_schedule_weekdays(cls, values: list[int]) -> list[int]:
+        return normalize_schedule_weekdays(values)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        return ensure_timezone(value)
+
+    @field_validator("target_chat_ids")
+    @classmethod
+    def validate_target_chat_ids(cls, values: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(values)) > MAX_TARGET_CHAT_IDS:
+            raise ValueError(f"Можно выбрать не больше {MAX_TARGET_CHAT_IDS} групп на один пост")
+        return values
 
 
 class PostResumeUpdate(BaseModel):
@@ -158,14 +214,14 @@ class PostOut(BaseModel):
     id: uuid.UUID
     title: str
     body: str
-    parse_mode: str | None
+    parse_mode: ParseMode | None
     status: PostStatus
     schedule_kind: ScheduleKind
     next_run_at: datetime | None
     interval_minutes: int | None
     schedule_weekdays: list[int] = Field(default_factory=list)
     timezone: str
-    session_strategy: str
+    session_strategy: SessionStrategy
     default_session_id: uuid.UUID | None
     target_chat_ids: list[uuid.UUID]
     media: list[PostMediaOut] = Field(default_factory=list)

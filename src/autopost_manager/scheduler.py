@@ -8,44 +8,16 @@ from sqlalchemy import exists, func, select
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
 from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
+from autopost_manager.schedule import (
+    WeekdaySet,
+    advance_by_days_until_future,
+    as_utc_aware,
+    next_same_time_on_weekdays,
+)
 
 
 def as_aware(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=UTC)
-
-
-def parse_weekdays(value: str | None) -> set[int]:
-    if not value:
-        return set()
-    days: set[int] = set()
-    for item in value.split(","):
-        try:
-            day = int(item)
-        except ValueError:
-            continue
-        if 0 <= day <= 6:
-            days.add(day)
-    return days
-
-
-def advance_by_days_until_future(start: datetime, now: datetime, days: int) -> datetime:
-    candidate = as_aware(start)
-    reference = as_aware(now)
-    while candidate <= reference:
-        candidate += timedelta(days=days)
-    return candidate
-
-
-def next_same_time_on_weekdays(start: datetime, now: datetime, weekdays: set[int]) -> datetime | None:
-    if not weekdays:
-        return None
-    candidate = as_aware(start)
-    reference = as_aware(now)
-    for _ in range(15):
-        candidate += timedelta(days=1)
-        if candidate > reference and candidate.weekday() in weekdays:
-            return candidate
-    return None
+    return as_utc_aware(value)
 
 
 def next_run_after(post: Post, now: datetime) -> datetime | None:
@@ -60,11 +32,15 @@ def next_run_after(post: Post, now: datetime) -> datetime | None:
     if post.schedule_kind == ScheduleKind.every_other_day:
         return advance_by_days_until_future(current, now, 2)
     if post.schedule_kind == ScheduleKind.weekdays:
-        return next_same_time_on_weekdays(current, now, {0, 1, 2, 3, 4})
+        return next_same_time_on_weekdays(current, now, WeekdaySet(frozenset({0, 1, 2, 3, 4})))
     if post.schedule_kind == ScheduleKind.weekends:
-        return next_same_time_on_weekdays(current, now, {5, 6})
+        return next_same_time_on_weekdays(current, now, WeekdaySet(frozenset({5, 6})))
     if post.schedule_kind == ScheduleKind.custom_weekdays:
-        return next_same_time_on_weekdays(current, now, parse_weekdays(post.schedule_weekdays))
+        return next_same_time_on_weekdays(
+            current,
+            now,
+            WeekdaySet.parse_storage_value(post.schedule_weekdays),
+        )
     return None
 
 

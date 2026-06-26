@@ -69,6 +69,7 @@ from autopost_manager.schemas import (
     TargetChatCreate,
     UserSettingsOut,
 )
+from autopost_manager.schedule import WeekdaySet
 from autopost_manager.security import require_user, verify_webapp_init_data
 from autopost_manager.telegram_client import (
     confirm_login_code,
@@ -285,24 +286,11 @@ def as_aware(value: datetime) -> datetime:
 
 
 def parse_schedule_weekdays(value: str | None) -> list[int]:
-    if not value:
-        return []
-    days: list[int] = []
-    for item in value.split(","):
-        try:
-            day = int(item)
-        except ValueError:
-            continue
-        if 0 <= day <= 6 and day not in days:
-            days.append(day)
-    return days
+    return WeekdaySet.parse_storage_value(value).as_list()
 
 
 def serialize_schedule_weekdays(values: list[int] | None) -> str | None:
-    if not values:
-        return None
-    days = sorted({int(value) for value in values if 0 <= int(value) <= 6})
-    return ",".join(str(day) for day in days) if days else None
+    return WeekdaySet.from_request(values).serialize_for_storage()
 
 
 def schedule_weekdays_for_storage(

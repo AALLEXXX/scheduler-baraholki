@@ -9,7 +9,8 @@ from typing import Callable
 import pytest
 from fastapi.testclient import TestClient
 
-TEST_DB_PATH = Path("/tmp/autopost_manager_pytest.sqlite")
+TEST_WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "master")
+TEST_DB_PATH = Path(f"/tmp/autopost_manager_pytest_{TEST_WORKER_ID}.sqlite")
 TEST_DB_PATH.unlink(missing_ok=True)
 
 os.environ.setdefault("APP_ENV", "test")
@@ -22,7 +23,7 @@ os.environ.setdefault("BOT_TOKEN", "1234567890:TEST_BOT_TOKEN_VALUE")
 os.environ.setdefault("TELEGRAM_API_ID", "123456")
 os.environ.setdefault("TELEGRAM_API_HASH", "0123456789abcdef0123456789abcdef")
 os.environ.setdefault("TELEGRAM_SESSIONS_DIR", "/tmp/autopost_manager_sessions")
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{TEST_DB_PATH}")
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{TEST_DB_PATH}"
 
 from autopost_manager import api as api_module  # noqa: E402
 from autopost_manager.db import Base, SessionLocal, engine  # noqa: E402

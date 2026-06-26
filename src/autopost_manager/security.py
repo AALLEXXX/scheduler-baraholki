@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
 from urllib.parse import parse_qsl
 
@@ -26,8 +27,6 @@ def verify_webapp_init_data(init_data: str, bot_token: str, max_age_seconds: int
     if not hmac.compare_digest(calculated_hash, received_hash):
         raise ValueError("Invalid Telegram init data hash")
 
-    import json
-
     user = json.loads(parsed.get("user", "{}"))
     user_id = user.get("id")
     if not isinstance(user_id, int):
@@ -51,6 +50,3 @@ def require_user(x_telegram_init_data: str | None = Header(default=None)) -> int
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     return telegram_id
-
-
-require_admin = require_user

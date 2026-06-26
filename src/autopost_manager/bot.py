@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal, create_schema
@@ -15,8 +16,12 @@ from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
 
 
-def has_telegram_user(message: Message) -> bool:
-    return bool(message.from_user)
+class DraftLimitError(ValueError):
+    pass
+
+
+def has_telegram_sender(message: Message) -> bool:
+    return message.from_user is not None
 
 
 def panel_keyboard() -> InlineKeyboardMarkup:
@@ -34,7 +39,7 @@ def panel_keyboard() -> InlineKeyboardMarkup:
 
 
 async def start(message: Message) -> None:
-    if not has_telegram_user(message):
+    if not has_telegram_sender(message):
         await message.answer("Access denied.")
         return
 
@@ -45,7 +50,7 @@ async def start(message: Message) -> None:
 
 
 async def status(message: Message) -> None:
-    if not has_telegram_user(message):
+    if not has_telegram_sender(message):
         await message.answer("Access denied.")
         return
     await message.answer("Сервис работает. Посты отправляются через подключенные аккаунты пользователей.")
@@ -95,7 +100,25 @@ def extract_media(message: Message) -> tuple[str, str, str | None] | None:
     return None
 
 
-def find_album_post(db, owner_id: int, media_group_id: str) -> Post | None:
+def media_file_size(message: Message) -> int | None:
+    media = (
+        getattr(message, "video", None)
+        or getattr(message, "animation", None)
+        or getattr(message, "document", None)
+    )
+    return getattr(media, "file_size", None)
+
+
+def validate_message_limits(message: Message, html_body: str) -> None:
+    settings = get_settings()
+    if len(html_body) > 4096:
+        raise DraftLimitError("Пост слишком длинный. Максимум — 4096 символов.")
+    file_size = media_file_size(message)
+    if file_size is not None and file_size > settings.max_bot_file_bytes:
+        raise DraftLimitError("Файл слишком большой. Загрузите медиа меньшего размера.")
+
+
+def find_album_post(db: Session, owner_id: int, media_group_id: str) -> Post | None:
     return db.scalars(
         select(Post)
         .join(PostMedia)
@@ -106,12 +129,29 @@ def find_album_post(db, owner_id: int, media_group_id: str) -> Post | None:
     ).first()
 
 
+def draft_count(db: Session, owner_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Post)
+            .where(Post.created_by_telegram_id == owner_id)
+            .where(Post.status == PostStatus.draft)
+        )
+        or 0
+    )
+
+
+def media_count(db: Session, post_id) -> int:
+    return int(db.scalar(select(func.count(PostMedia.id)).where(PostMedia.post_id == post_id)) or 0)
+
+
 def save_message_as_draft(message: Message) -> tuple[Post, bool]:
     if not message.from_user:
         raise ValueError("Message has no user")
 
     owner_id = message.from_user.id
     html_body = html_body_from_message(message)
+    validate_message_limits(message, html_body)
     media = extract_media(message)
     media_type = media[0] if media else None
     media_group_id = message.media_group_id
@@ -121,6 +161,8 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
         created = post is None
 
         if not post:
+            if draft_count(db, owner_id) >= get_settings().max_drafts_per_user:
+                raise DraftLimitError("Достигнут лимит черновиков. Удалите старые черновики.")
             post = Post(
                 title=title_from_message(message, html_body, media_type),
                 body=html_body,
@@ -141,6 +183,8 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
             post.title = title_from_message(message, html_body, media_type)
 
         if media:
+            if media_count(db, post.id) >= get_settings().max_media_items_per_post:
+                raise DraftLimitError("Слишком много медиа в одном черновике.")
             existing_media = db.scalars(
                 select(PostMedia)
                 .where(PostMedia.post_id == post.id)
@@ -187,7 +231,11 @@ async def save_draft(message: Message) -> None:
     if not (message.text or message.caption or extract_media(message)):
         return
 
-    post, created = save_message_as_draft(message)
+    try:
+        post, created = save_message_as_draft(message)
+    except DraftLimitError as exc:
+        await message.answer(str(exc))
+        return
     if created:
         ack_message = await message.answer(
             POST_SAVED_ACK_TEXT,

@@ -17,6 +17,9 @@ class FakeMessage:
         html_text: str | None = None,
         caption: str | None = None,
         photo=None,
+        video=None,
+        animation=None,
+        document=None,
         media_group_id: str | None = None,
         message_id: int = 1,
     ) -> None:
@@ -25,9 +28,9 @@ class FakeMessage:
         self.html_text = html_text
         self.caption = caption
         self.photo = photo
-        self.video = None
-        self.animation = None
-        self.document = None
+        self.video = video
+        self.animation = animation
+        self.document = document
         self.media_group_id = media_group_id
         self.message_id = message_id
         self.chat = SimpleNamespace(id=from_user.id if hasattr(from_user, "id") else 111)
@@ -38,9 +41,9 @@ class FakeMessage:
         return SimpleNamespace(chat=self.chat, message_id=self.message_id + 1000)
 
 
-def test_has_telegram_user_requires_sender() -> None:
-    assert bot_module.has_telegram_user(FakeMessage(from_user=object())) is True
-    assert bot_module.has_telegram_user(FakeMessage(from_user=None)) is False
+def test_has_telegram_sender_requires_sender() -> None:
+    assert bot_module.has_telegram_sender(FakeMessage(from_user=object())) is True
+    assert bot_module.has_telegram_sender(FakeMessage(from_user=None)) is False
 
 
 def test_start_sends_mini_app_button(monkeypatch) -> None:
@@ -177,3 +180,38 @@ def test_save_draft_stores_bot_ack_message_id() -> None:
         assert post.source_bot_message_id == 30
         assert post.ack_bot_chat_id == 111
         assert post.ack_bot_message_id == 1030
+
+
+def test_save_draft_replies_when_body_is_too_long() -> None:
+    message = FakeMessage(from_user=SimpleNamespace(id=111), text="x" * 4097, message_id=40)
+
+    asyncio.run(bot_module.save_draft(message))
+
+    assert "слишком длинный" in message.answers[0][0]
+    with SessionLocal() as db:
+        assert db.query(Post).count() == 0
+
+
+def test_save_message_as_draft_enforces_media_limit(monkeypatch) -> None:
+    monkeypatch.setattr(bot_module, "get_settings", lambda: SimpleNamespace(max_media_items_per_post=1, max_bot_file_bytes=100, max_drafts_per_user=100))
+    first = FakeMessage(
+        from_user=SimpleNamespace(id=111),
+        photo=[SimpleNamespace(file_id="first", file_unique_id="first-unique")],
+        media_group_id="album-limit",
+        message_id=50,
+    )
+    second = FakeMessage(
+        from_user=SimpleNamespace(id=111),
+        photo=[SimpleNamespace(file_id="second", file_unique_id="second-unique")],
+        media_group_id="album-limit",
+        message_id=51,
+    )
+
+    bot_module.save_message_as_draft(first)
+
+    try:
+        bot_module.save_message_as_draft(second)
+    except bot_module.DraftLimitError as exc:
+        assert "Слишком много медиа" in str(exc)
+    else:
+        raise AssertionError("Expected media limit error")

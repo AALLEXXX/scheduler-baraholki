@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     max_targets_per_post: int = 15
     max_active_posts_per_user: int = 50
     max_jobs_per_user_per_day: int = 300
+    max_drafts_per_user: int = 100
     max_media_items_per_post: int = 10
     max_bot_file_bytes: int = 25 * 1024 * 1024
     telegram_operation_timeout_seconds: int = 60
