@@ -410,8 +410,38 @@ def check_rate_limit(
 
 
 def normalize_phone_key(phone: str) -> str:
-    digits = "".join(ch for ch in phone if ch.isdigit())
+    digits = phone_digits(phone)
     return digits[-12:] if digits else "unknown"
+
+
+def phone_digits(phone: str | None) -> str:
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def find_session_by_phone(db: Session, *, owner_telegram_id: int, phone: str) -> TelegramSession | None:
+    target_digits = phone_digits(phone)
+    if not target_digits:
+        return None
+    sessions = db.scalars(
+        select(TelegramSession)
+        .where(TelegramSession.owner_telegram_id == owner_telegram_id)
+        .order_by(TelegramSession.created_at.desc())
+    ).all()
+    return next((session for session in sessions if phone_digits(session.phone) == target_digits), None)
+
+
+def unique_session_name(db: Session, *, owner_telegram_id: int, safe_phone: str) -> str:
+    base_name = f"tg_{owner_telegram_id}_{safe_phone or 'account'}"
+    existing = db.scalar(select(TelegramSession.id).where(TelegramSession.name == base_name))
+    if not existing:
+        return base_name
+
+    for index in range(2, 100):
+        candidate = f"{base_name}_{index}"
+        existing = db.scalar(select(TelegramSession.id).where(TelegramSession.name == candidate))
+        if not existing:
+            return candidate
+    return f"{base_name}_{uuid.uuid4().hex[:8]}"
 
 
 def sent_since(db: Session, *, telegram_user_id: int | None = None, since: datetime | None = None) -> int:
@@ -727,18 +757,13 @@ async def start_account_login(
         limit=RATE_LIMIT_LOGIN_START_ATTEMPTS,
         window_seconds=RATE_LIMIT_LOGIN_START_WINDOW_SECONDS,
     )
-    safe_phone = "".join(ch for ch in payload.phone if ch.isdigit())
-    session_name = f"tg_{telegram_user_id}_{safe_phone[-8:] or 'account'}"
-    session_path = str(settings.telegram_sessions_dir / session_name)
-
-    session = db.scalars(
-        select(TelegramSession)
-        .where(TelegramSession.owner_telegram_id == telegram_user_id)
-        .where(TelegramSession.phone == payload.phone)
-    ).first()
+    safe_phone = phone_digits(payload.phone)
+    session = find_session_by_phone(db, owner_telegram_id=telegram_user_id, phone=payload.phone)
     if not session:
         if user_sessions_count(db, telegram_user_id) >= settings.max_sessions_per_user:
             raise HTTPException(status_code=429, detail="Достигнут лимит Telegram-аккаунтов")
+        session_name = unique_session_name(db, owner_telegram_id=telegram_user_id, safe_phone=safe_phone)
+        session_path = str(settings.telegram_sessions_dir / session_name)
         session = TelegramSession(
             owner_telegram_id=telegram_user_id,
             name=session_name,
@@ -752,8 +777,12 @@ async def start_account_login(
         db.add(session)
         db.flush()
     else:
+        session.phone = payload.phone
         session.api_id = settings.telegram_api_id
         session.api_hash = settings.telegram_api_hash
+        session_name = session.name or unique_session_name(db, owner_telegram_id=telegram_user_id, safe_phone=safe_phone)
+        session_path = str(settings.telegram_sessions_dir / session_name)
+        session.name = session.name or session_name
         session.session_path = session.session_path or session_path
 
     cooldown_seconds = remaining_login_code_cooldown(session)

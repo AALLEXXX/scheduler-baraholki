@@ -328,6 +328,81 @@ def test_start_login_normalizes_phone_before_telegram(
         assert session.phone == "+18286637535"
 
 
+def test_start_login_reuses_session_with_legacy_spaced_phone(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+    existing = make_session(
+        db_session,
+        owner_id=111,
+        name="tg_111_86637535",
+        phone="+1 828 663 7535",
+        status=SessionStatus.revoked,
+    )
+    db_session.commit()
+
+    async def fake_request_login_code(session, *, force_sms=False):
+        assert session.id == existing.id
+        assert session.phone == "+18286637535"
+        return SimpleNamespace(
+            phone_code_hash="phone-code-hash",
+            delivery_type="SentCodeTypeApp",
+            next_delivery_type=None,
+            timeout=60,
+        )
+
+    monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "+1 (828) 663-7535"},
+    )
+
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        sessions = db.query(api_module.TelegramSession).all()
+        assert len(sessions) == 1
+        assert sessions[0].phone == "+18286637535"
+        assert sessions[0].status == SessionStatus.code_needed
+
+
+def test_start_login_uses_full_phone_for_session_name(
+    client,
+    auth_user,
+    db_session,
+    monkeypatch,
+) -> None:
+    auth_user(111)
+    make_session(db_session, owner_id=111, name="tg_111_86637535", phone="+99586637535")
+    db_session.commit()
+
+    async def fake_request_login_code(session, *, force_sms=False):
+        assert session.name == "tg_111_18286637535"
+        assert session.phone == "+18286637535"
+        return SimpleNamespace(
+            phone_code_hash="phone-code-hash",
+            delivery_type="SentCodeTypeApp",
+            next_delivery_type=None,
+            timeout=60,
+        )
+
+    monkeypatch.setattr(api_module, "request_login_code", fake_request_login_code)
+
+    response = client.post(
+        "/api/account/start-login",
+        json={"phone": "+1 (828) 663-7535"},
+    )
+
+    assert response.status_code == 200, response.text
+    with SessionLocal() as db:
+        sessions = db.query(api_module.TelegramSession).order_by(api_module.TelegramSession.created_at).all()
+        assert len(sessions) == 2
+        assert sessions[1].name == "tg_111_18286637535"
+
+
 def test_start_login_updates_existing_session_and_reports_send_error(
     client,
     auth_user,
