@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import logging
 import uuid
@@ -84,6 +83,9 @@ from autopost_manager.services.posts import parse_schedule_weekdays as post_pars
 from autopost_manager.services.posts import post_to_out as service_post_to_out
 from autopost_manager.services.posts import schedule_weekdays_for_storage as post_schedule_weekdays_for_storage
 from autopost_manager.services.posts import serialize_schedule_weekdays as post_serialize_schedule_weekdays
+from autopost_manager.services.telegram_cleanup import BotMessageDeleteResult
+from autopost_manager.services.telegram_cleanup import TelegramCleanupService
+from autopost_manager.services.telegram_cleanup import collect_source_message_refs as service_collect_source_message_refs
 from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
@@ -251,26 +253,12 @@ async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-@dataclass
-class BotMessageDeleteResult:
-    attempted: int = 0
-    deleted: int = 0
-    errors: list[str] = field(default_factory=list)
-
-
 def post_to_out(post: Post) -> PostOut:
     return service_post_to_out(post)
 
 
 def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
-    refs: set[tuple[int, int]] = set()
-    if post.source_bot_chat_id and post.source_bot_message_id:
-        refs.add((post.source_bot_chat_id, post.source_bot_message_id))
-    if post.ack_bot_chat_id and post.ack_bot_message_id:
-        refs.add((post.ack_bot_chat_id, post.ack_bot_message_id))
-    for media in post.media_items:
-        refs.add((media.source_bot_chat_id, media.source_bot_message_id))
-    return refs
+    return service_collect_source_message_refs(post)
 
 
 def as_aware(value: datetime) -> datetime:
@@ -492,34 +480,15 @@ def require_active_account(
 
 
 async def delete_bot_messages(refs: set[tuple[int, int]]) -> BotMessageDeleteResult:
-    result = BotMessageDeleteResult()
-    if not refs:
-        return result
-
-    bot = Bot(token=get_settings().bot_token)
-    try:
-        for chat_id, message_id in refs:
-            result.attempted += 1
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=message_id)
-            except Exception as exc:
-                result.errors.append(f"{chat_id}/{message_id}: {exc}")
-                await send_alert(
-                    title="Bot message delete error",
-                    status="error",
-                    fields={
-                        "action": "delete_bot_message",
-                        "bot_chat_id": chat_id,
-                        "bot_message_id": message_id,
-                        "error_type": type(exc).__name__,
-                        "error": exc,
-                    },
-                )
-                continue
-            result.deleted += 1
-    finally:
-        await bot.session.close()
-    return result
+    settings = get_settings()
+    return await TelegramCleanupService(
+        db=None,
+        bot_token=settings.bot_token,
+        bot_username=settings.bot_username,
+        send_alert=send_alert,
+        delete_messages_from_session=delete_messages_from_session,
+        bot_factory=Bot,
+    ).delete_bot_messages(refs)
 
 
 async def delete_source_messages(
@@ -532,48 +501,23 @@ async def delete_source_messages(
     created_at=None,
     media_count: int = 0,
 ) -> BotMessageDeleteResult:
-    if not refs and not match_texts and not ack_text and not media_count:
-        return BotMessageDeleteResult()
-
-    message_ids = sorted({message_id for _chat_id, message_id in refs})
-    session = TelegramSessionRepository(db).active_for_owner(telegram_user_id)
-    if not session:
-        return await delete_bot_messages(refs)
-
-    result = BotMessageDeleteResult(attempted=len(message_ids))
-    try:
-        bot_peer = f"@{get_settings().bot_username.lstrip('@')}"
-        result.deleted = await delete_messages_from_session(
-            session=session,
-            peer=bot_peer,
-            message_ids=message_ids,
-            match_texts=match_texts,
-            ack_text=ack_text,
-            created_at=created_at,
-            media_count=media_count,
-        )
-        result.attempted = max(result.attempted, result.deleted)
-    except Exception as exc:
-        result.errors.append(f"user session: {exc}")
-        await send_alert(
-            title="Source message delete error",
-            status="error",
-            fields={
-                "action": "delete_source_messages",
-                "owner_telegram_id": telegram_user_id,
-                "source_message_ids": ",".join(str(message_id) for message_id in message_ids),
-                "error_type": type(exc).__name__,
-                "error": exc,
-            },
-        )
-
-    if result.deleted == 0:
-        fallback = await delete_bot_messages(refs)
-        result.attempted += fallback.attempted
-        result.deleted += fallback.deleted
-        result.errors.extend(fallback.errors)
-
-    return result
+    settings = get_settings()
+    return await TelegramCleanupService(
+        db=db,
+        bot_token=settings.bot_token,
+        bot_username=settings.bot_username,
+        send_alert=send_alert,
+        delete_messages_from_session=delete_messages_from_session,
+        bot_factory=Bot,
+    ).delete_source_messages(
+        telegram_user_id=telegram_user_id,
+        refs=refs,
+        delete_bot_messages=delete_bot_messages,
+        match_texts=match_texts,
+        ack_text=ack_text,
+        created_at=created_at,
+        media_count=media_count,
+    )
 
 
 def validate_post_schedule(
