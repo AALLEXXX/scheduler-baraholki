@@ -28,7 +28,7 @@ from telethon.errors import (
 
 from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
-from autopost_manager.db import create_schema, get_db
+from autopost_manager.db import get_db
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import (
     JobStatus,
@@ -229,7 +229,6 @@ def validate_runtime_settings() -> None:
 
 def startup() -> None:
     validate_runtime_settings()
-    create_schema()
     get_settings().telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
 
 

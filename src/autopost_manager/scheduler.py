@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import exists, func, select
 
 from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.db import SessionLocal
 from autopost_manager.models import JobStatus, Post, PostStatus, PublishJob, ScheduleKind, UserSettings
 from autopost_manager.schedule import (
     WeekdaySet,
@@ -111,7 +111,6 @@ def enqueue_due_posts() -> int:
 
 
 async def run_scheduler() -> None:
-    create_schema()
     settings = get_settings()
     while True:
         enqueue_due_posts()

@@ -133,6 +133,10 @@ MINI_APP_URL=http://localhost:8000/miniapp/
 docker compose up --build
 ```
 
+Compose сначала запускает одноразовый сервис `migrate`, а затем runtime-сервисы.
+Если запускаете процессы без Docker Compose, выполните `autopost-db-upgrade`
+перед стартом API, bot, scheduler или worker.
+
 Проверьте API:
 
 ```bash

@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.db import SessionLocal
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
 from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
 
@@ -245,7 +245,6 @@ async def save_draft(message: Message) -> None:
 
 
 async def run_bot() -> None:
-    create_schema()
     settings = get_settings()
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()

@@ -8,7 +8,7 @@ from telethon.errors import FloodWaitError
 
 from autopost_manager.alerts import send_alert
 from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.db import SessionLocal
 from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.telegram_client import classify_send_error, send_post_from_session
@@ -186,7 +186,6 @@ async def process_one_job() -> bool:
 
 
 async def run_worker() -> None:
-    create_schema()
     settings = get_settings()
     while True:
         processed = await process_one_job()
