@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from autopost_manager.config import get_settings
+from autopost_manager.consumers.scheduler import enqueue_due_posts as consumer_enqueue_due_posts
+from autopost_manager.consumers.scheduler import run_scheduler as consumer_run_scheduler
 from autopost_manager.models import Post
 from autopost_manager.schedule import as_utc_aware
-from autopost_manager.services.scheduler import SchedulerService
 from autopost_manager.services.scheduler import next_run_after as calculate_next_run_after
 
 
@@ -19,14 +19,11 @@ def next_run_after(post: Post, now: datetime) -> datetime | None:
 
 
 def enqueue_due_posts() -> int:
-    return SchedulerService().enqueue_due_posts()
+    return consumer_enqueue_due_posts()
 
 
 async def run_scheduler() -> None:
-    settings = get_settings()
-    while True:
-        enqueue_due_posts()
-        await asyncio.sleep(settings.scheduler_tick_seconds)
+    await consumer_run_scheduler()
 
 
 def main() -> None:

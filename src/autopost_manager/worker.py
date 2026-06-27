@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 
 from autopost_manager.alerts import send_alert
-from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal
+from autopost_manager.consumers.worker import run_worker as consumer_run_worker
 from autopost_manager.models import PublishJob, TelegramSession
 from autopost_manager.services.worker import MAX_JOB_ATTEMPTS as MAX_JOB_ATTEMPTS
 from autopost_manager.services.worker import PROCESSING_TIMEOUT_SECONDS as PROCESSING_TIMEOUT_SECONDS
-from autopost_manager.services.worker import WorkerService
 from autopost_manager.services.worker import alert_job_issue as service_alert_job_issue
 from autopost_manager.services.worker import choose_session as choose_session
 from autopost_manager.services.worker import next_day_start as next_day_start
@@ -38,23 +36,17 @@ async def alert_job_issue(
 
 
 async def process_one_job() -> bool:
-    with SessionLocal() as db:
-        service = WorkerService(
-            db=db,
-            settings=get_settings(),
-            send_post=send_post_from_session,
-            send_alert=send_alert,
-            choose_session=choose_session,
-        )
-        return await service.process_one_job()
+    from autopost_manager.consumers.worker import process_one_job as consumer_process_one_job
+
+    return await consumer_process_one_job(
+        send_post=send_post_from_session,
+        send_alert=send_alert,
+        choose_active_session=choose_session,
+    )
 
 
 async def run_worker() -> None:
-    settings = get_settings()
-    while True:
-        processed = await process_one_job()
-        if not processed:
-            await asyncio.sleep(settings.worker_tick_seconds)
+    await consumer_run_worker(process_job=process_one_job)
 
 
 def main() -> None:

@@ -1,64 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 
 from telethon import TelegramClient
-from telethon.sessions import StringSession
 
-from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal, create_schema
-from autopost_manager.models import SessionStatus, TelegramSession
+from autopost_manager.cli.session_login import login_session as cli_login_session
+from autopost_manager.cli.session_login import main as cli_main
 
 
 async def login_session(name: str, phone: str) -> None:
-    create_schema()
-    settings = get_settings()
-    settings.telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
-    session_path = str(settings.telegram_sessions_dir / name.replace(" ", "_").lower())
-    string_session = StringSession()
-
-    async with TelegramClient(
-        string_session,
-        settings.telegram_api_id,
-        settings.telegram_api_hash,
-    ) as client:
-        await client.start(phone=phone)
-        me = await client.get_me()
-        session_string = StringSession.save(client.session)
-
-    with SessionLocal() as db:
-        existing = db.query(TelegramSession).filter(TelegramSession.name == name).one_or_none()
-        if existing:
-            existing.phone = phone
-            existing.telegram_user_id = me.id
-            existing.username = me.username
-            existing.status = SessionStatus.active
-            existing.session_path = session_path
-            existing.session_string = session_string
-        else:
-            db.add(
-                TelegramSession(
-                    owner_telegram_id=None,
-                    name=name,
-                    phone=phone,
-                    telegram_user_id=me.id,
-                    username=me.username,
-                    status=SessionStatus.active,
-                    session_path=session_path,
-                    session_string=session_string,
-                    min_send_interval_seconds=settings.default_min_send_interval_seconds,
-                )
-            )
-        db.commit()
-
-    print(f"Authorized session '{name}' as {me.id} @{me.username or ''}".strip())
+    await cli_login_session(name, phone, telegram_client_class=TelegramClient)
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("Usage: autopost-login-session <session-name> <phone>")
-    asyncio.run(login_session(sys.argv[1], sys.argv[2]))
+    cli_main(sys.argv[1:])
 
 
 if __name__ == "__main__":
