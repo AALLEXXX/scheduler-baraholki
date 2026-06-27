@@ -14,7 +14,7 @@ from autopost_manager.services.worker import owner_settings as owner_settings
 from autopost_manager.services.worker import recover_stale_processing_jobs as recover_stale_processing_jobs
 from autopost_manager.services.worker import retry_delay as retry_delay
 from autopost_manager.services.worker import sent_today as sent_today
-from autopost_manager.telegram_client import send_post_from_session
+from autopost_manager.services.telegram_delivery import send_post_from_session
 
 
 async def alert_job_issue(

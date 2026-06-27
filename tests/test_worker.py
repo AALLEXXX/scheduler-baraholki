@@ -209,6 +209,28 @@ def test_process_one_job_does_not_retry_write_forbidden_errors(monkeypatch, db_s
         assert "Chat write forbidden" in refreshed.last_error
 
 
+def test_process_one_job_marks_session_needing_login_on_auth_error(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    post = make_post(db_session, owner_id=111, session=session, chats=[chat])
+    job = make_job(db_session, post, chat, session=session)
+    db_session.commit()
+
+    async def unauthorized_send_post_from_session(*_args, **_kwargs):
+        raise RuntimeError("Telegram session needs login")
+
+    monkeypatch.setattr(worker, "send_post_from_session", unauthorized_send_post_from_session)
+
+    processed = asyncio.run(worker.process_one_job())
+
+    assert processed is True
+    with SessionLocal() as db:
+        refreshed_job = db.get(PublishJob, job.id)
+        refreshed_session = db.get(type(session), session.id)
+        assert refreshed_job.status == JobStatus.failed
+        assert refreshed_session.status == SessionStatus.needs_login
+
+
 def test_process_one_job_marks_session_limited_on_flood_wait(monkeypatch, db_session) -> None:
     session = make_session(db_session, owner_id=111)
     chat = make_chat(db_session, session)

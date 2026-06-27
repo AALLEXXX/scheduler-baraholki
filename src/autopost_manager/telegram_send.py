@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from autopost_manager.config import get_settings
-from autopost_manager.models import ParseMode, Post, PostMedia, SessionStatus, TelegramSession
+from autopost_manager.models import ParseMode, Post, PostMedia, TelegramSession
 from autopost_manager.telegram_cleanup_client import near_datetime, normalize_plain_text
 from autopost_manager.telegram_media import extract_sent_message_id
 from autopost_manager.telegram_media import send_files_with_optional_text
 from autopost_manager.telegram_runtime import (
+    client_session_string,
     disconnect_client,
-    remember_client_session,
     session_lock,
     telegram_timeout,
 )
@@ -25,6 +24,13 @@ DownloadBotFile = Callable[[str, str], Awaitable[str]]
 Sleep = Callable[[float], Awaitable[None]]
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramSendResult:
+    message_id: int
+    sent_at: datetime
+    session_string: str | None = None
+
+
 def telegram_parse_mode(parse_mode: str | ParseMode | None) -> str | None:
     if parse_mode == ParseMode.plain:
         return None
@@ -32,7 +38,6 @@ def telegram_parse_mode(parse_mode: str | ParseMode | None) -> str | None:
 
 
 async def send_message_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     text: str,
@@ -40,7 +45,7 @@ async def send_message_from_session(
     *,
     build_client_func: BuildClient,
     sleep: Sleep = asyncio.sleep,
-) -> int:
+) -> TelegramSendResult:
     async with session_lock(session.session_path):
         now = datetime.now(UTC)
         if session.last_send_at:
@@ -53,22 +58,23 @@ async def send_message_from_session(
         await telegram_timeout(client.connect(), 20)
         try:
             if not await telegram_timeout(client.is_user_authorized(), 20):
-                session.status = SessionStatus.needs_login
                 raise RuntimeError("Telegram session needs login")
             message = await telegram_timeout(
                 client.send_message(chat_id, text, parse_mode=parse_mode),
             )
+            sent_at = datetime.now(UTC)
+            session_string = client_session_string(client)
         finally:
-            remember_client_session(session, client)
             await disconnect_client(client)
 
-        session.last_send_at = datetime.now(UTC)
-        session.status = SessionStatus.active
-        return int(message.id)
+        return TelegramSendResult(
+            message_id=int(message.id),
+            sent_at=sent_at,
+            session_string=session_string,
+        )
 
 
 async def send_post_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     post: Post,
@@ -76,11 +82,10 @@ async def send_post_from_session(
     build_client_func: BuildClient,
     download_bot_file_func: DownloadBotFile,
     sleep: Sleep = asyncio.sleep,
-) -> int:
+) -> TelegramSendResult:
     media_items = sorted(post.media_items, key=lambda item: item.order_index)
     if not media_items:
         return await send_message_from_session(
-            db=db,
             session=session,
             chat_id=chat_id,
             text=post.body,
@@ -90,7 +95,6 @@ async def send_post_from_session(
         )
 
     return await send_media_from_session(
-        db=db,
         session=session,
         chat_id=chat_id,
         media_items=media_items,
@@ -104,7 +108,6 @@ async def send_post_from_session(
 
 
 async def send_media_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     media_items: list[PostMedia],
@@ -115,7 +118,7 @@ async def send_media_from_session(
     build_client_func: BuildClient,
     download_bot_file_func: DownloadBotFile,
     sleep: Sleep = asyncio.sleep,
-) -> int:
+) -> TelegramSendResult:
     async with session_lock(session.session_path):
         now = datetime.now(UTC)
         if session.last_send_at:
@@ -129,7 +132,6 @@ async def send_media_from_session(
         temp_files: list[str] = []
         try:
             if not await telegram_timeout(client.is_user_authorized(), 20):
-                session.status = SessionStatus.needs_login
                 raise RuntimeError("Telegram session needs login")
 
             source_message_ids = []
@@ -176,15 +178,18 @@ async def send_media_from_session(
                         text=text,
                         parse_mode=parse_mode,
                     )
+            sent_at = datetime.now(UTC)
+            session_string = client_session_string(client)
         finally:
             for temp_file in temp_files:
                 Path(temp_file).unlink(missing_ok=True)
-            remember_client_session(session, client)
             await disconnect_client(client)
 
-        session.last_send_at = datetime.now(UTC)
-        session.status = SessionStatus.active
-        return extract_sent_message_id(sent)
+        return TelegramSendResult(
+            message_id=extract_sent_message_id(sent),
+            sent_at=sent_at,
+            session_string=session_string,
+        )
 
 
 async def find_forwardable_source_message_ids(

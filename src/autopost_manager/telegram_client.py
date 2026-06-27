@@ -28,14 +28,14 @@ from autopost_manager.telegram_login import request_login_code as telegram_reque
 from autopost_manager.telegram_media import download_bot_file as telegram_download_bot_file
 from autopost_manager.telegram_media import extract_sent_message_id as telegram_extract_sent_message_id
 from autopost_manager.telegram_media import send_files_with_optional_text as telegram_send_files_with_optional_text
+from autopost_manager.services.telegram_delivery import send_media_from_session as service_send_media_from_session
+from autopost_manager.services.telegram_delivery import send_message_from_session as service_send_message_from_session
+from autopost_manager.services.telegram_delivery import send_post_from_session as service_send_post_from_session
 from autopost_manager.telegram_runtime import build_client as runtime_build_client
 from autopost_manager.telegram_runtime import legacy_session_string as runtime_legacy_session_string
 from autopost_manager.telegram_send import find_forwardable_source_message_ids as telegram_find_forwardable_source_message_ids
 from autopost_manager.telegram_send import is_outgoing_message as telegram_is_outgoing_message
 from autopost_manager.telegram_send import message_distance as telegram_message_distance
-from autopost_manager.telegram_send import send_media_from_session as telegram_send_media_from_session
-from autopost_manager.telegram_send import send_message_from_session as telegram_send_message_from_session
-from autopost_manager.telegram_send import send_post_from_session as telegram_send_post_from_session
 
 
 def build_client(session: TelegramSession) -> TelegramClient:
@@ -53,7 +53,7 @@ async def send_message_from_session(
     text: str,
     parse_mode: str | None,
 ) -> int:
-    return await telegram_send_message_from_session(
+    return await service_send_message_from_session(
         db=db,
         session=session,
         chat_id=chat_id,
@@ -70,7 +70,7 @@ async def send_post_from_session(
     chat_id: int,
     post: Post,
 ) -> int:
-    return await telegram_send_post_from_session(
+    return await service_send_post_from_session(
         db=db,
         session=session,
         chat_id=chat_id,
@@ -90,7 +90,7 @@ async def send_media_from_session(
     parse_mode: str | None,
     source_created_at: datetime | None = None,
 ) -> int:
-    return await telegram_send_media_from_session(
+    return await service_send_media_from_session(
         db=db,
         session=session,
         chat_id=chat_id,

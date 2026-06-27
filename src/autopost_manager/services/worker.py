@@ -185,7 +185,9 @@ class WorkerService:
         except Exception as exc:
             send_error = classify_send_error_info(exc)
             error = send_error.message
-            if send_error.limited:
+            if send_error.needs_login:
+                session.status = SessionStatus.needs_login
+            elif send_error.limited:
                 session.status = SessionStatus.limited
             delay = retry_delay(exc, job.attempts)
             if delay is None or send_error.terminal:

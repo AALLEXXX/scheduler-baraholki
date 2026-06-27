@@ -7,8 +7,8 @@ from autopost_manager.alerts import send_alert as default_send_alert
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import TelegramSession
+from autopost_manager.services.telegram_delivery import send_post_from_session
 from autopost_manager.services.worker import WorkerService, choose_session
-from autopost_manager.telegram_client import send_post_from_session
 
 SendPost = Callable[..., Awaitable[int]]
 SendAlert = Callable[..., Awaitable[None]]

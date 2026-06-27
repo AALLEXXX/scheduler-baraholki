@@ -46,7 +46,6 @@ def build_client(session: TelegramSession, client_class=TelegramClient) -> Teleg
     legacy_string = legacy_session_string(session.session_path) if not session_string else ""
     if legacy_string:
         session_string = legacy_string
-        session.session_string = encrypt_session_string(legacy_string)
     return client_class(StringSession(session_string or ""), api_id, api_hash)
 
 
@@ -63,11 +62,18 @@ def legacy_session_string(session_path: str | None) -> str:
         return ""
 
 
-def remember_client_session(session: TelegramSession, client) -> None:
+def client_session_string(client) -> str | None:
     client_session = getattr(client, "session", None)
     if not client_session:
-        return
+        return None
     session_string = StringSession.save(client_session)
+    if session_string:
+        return session_string
+    return None
+
+
+def remember_client_session(session: TelegramSession, client) -> None:
+    session_string = client_session_string(client)
     if session_string:
         session.session_string = encrypt_session_string(session_string)
 
