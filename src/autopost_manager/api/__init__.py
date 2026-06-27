@@ -693,7 +693,7 @@ def admin_stats(
 
 
 def _create_application():
-    from autopost_manager.api_routes.application import create_application
+    from autopost_manager.api.application import create_application
 
     return create_application()
 

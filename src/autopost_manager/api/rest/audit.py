@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from autopost_manager import api as handlers
-from autopost_manager.api_routes.helpers import add_dual_route
+from autopost_manager.api.routes import add_dual_route
 from autopost_manager.schemas import AuditMessageOut, AuditPageOut
 
 router = APIRouter()
