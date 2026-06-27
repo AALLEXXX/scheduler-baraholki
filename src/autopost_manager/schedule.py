@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def as_utc_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def schedule_timezone(timezone_name: str | None) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name or "UTC")
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,25 +51,35 @@ class WeekdaySet:
         return sorted(self.values)
 
 
-def advance_by_days_until_future(start: datetime, now: datetime, days: int) -> datetime:
-    candidate = as_utc_aware(start)
-    reference = as_utc_aware(now)
+def advance_by_days_until_future(
+    start: datetime,
+    now: datetime,
+    days: int,
+    *,
+    timezone_name: str | None = None,
+) -> datetime:
+    timezone = schedule_timezone(timezone_name)
+    candidate = as_utc_aware(start).astimezone(timezone)
+    reference = as_utc_aware(now).astimezone(timezone)
     while candidate <= reference:
         candidate += timedelta(days=days)
-    return candidate
+    return candidate.astimezone(UTC)
 
 
 def next_same_time_on_weekdays(
     start: datetime,
     now: datetime,
     weekdays: WeekdaySet,
+    *,
+    timezone_name: str | None = None,
 ) -> datetime | None:
     if not weekdays.values:
         return None
-    candidate = as_utc_aware(start)
-    reference = as_utc_aware(now)
+    timezone = schedule_timezone(timezone_name)
+    candidate = as_utc_aware(start).astimezone(timezone)
+    reference = as_utc_aware(now).astimezone(timezone)
     for _ in range(15):
         candidate += timedelta(days=1)
         if candidate > reference and candidate.weekday() in weekdays.values:
-            return candidate
+            return candidate.astimezone(UTC)
     return None

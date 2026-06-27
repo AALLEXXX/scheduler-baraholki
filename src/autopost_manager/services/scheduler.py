@@ -24,20 +24,31 @@ def next_run_after(post: Post, now: datetime) -> datetime | None:
     if post.schedule_kind == ScheduleKind.interval and post.interval_minutes:
         return now + timedelta(minutes=post.interval_minutes)
     if post.schedule_kind == ScheduleKind.daily:
-        return advance_by_days_until_future(current, now, 1)
+        return advance_by_days_until_future(current, now, 1, timezone_name=post.timezone)
     if post.schedule_kind == ScheduleKind.weekly:
-        return advance_by_days_until_future(current, now, 7)
+        return advance_by_days_until_future(current, now, 7, timezone_name=post.timezone)
     if post.schedule_kind == ScheduleKind.every_other_day:
-        return advance_by_days_until_future(current, now, 2)
+        return advance_by_days_until_future(current, now, 2, timezone_name=post.timezone)
     if post.schedule_kind == ScheduleKind.weekdays:
-        return next_same_time_on_weekdays(current, now, WeekdaySet(frozenset({0, 1, 2, 3, 4})))
+        return next_same_time_on_weekdays(
+            current,
+            now,
+            WeekdaySet(frozenset({0, 1, 2, 3, 4})),
+            timezone_name=post.timezone,
+        )
     if post.schedule_kind == ScheduleKind.weekends:
-        return next_same_time_on_weekdays(current, now, WeekdaySet(frozenset({5, 6})))
+        return next_same_time_on_weekdays(
+            current,
+            now,
+            WeekdaySet(frozenset({5, 6})),
+            timezone_name=post.timezone,
+        )
     if post.schedule_kind == ScheduleKind.custom_weekdays:
         return next_same_time_on_weekdays(
             current,
             now,
             WeekdaySet.parse_storage_value(post.schedule_weekdays),
+            timezone_name=post.timezone,
         )
     return None
 

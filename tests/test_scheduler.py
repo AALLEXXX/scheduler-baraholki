@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -190,6 +191,26 @@ def test_next_run_for_weekdays_skips_weekend(db_session) -> None:
     next_run = scheduler.next_run_after(post, friday + timedelta(minutes=1))
 
     assert next_run == friday + timedelta(days=3)
+
+
+def test_next_run_for_weekdays_uses_post_timezone_weekday(db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    chat = make_chat(db_session, session)
+    friday_tbilisi = datetime(2026, 6, 19, 0, 30, tzinfo=ZoneInfo("Asia/Tbilisi"))
+    stored_utc = friday_tbilisi.astimezone(UTC)
+    post = make_post(
+        db_session,
+        owner_id=111,
+        session=session,
+        chats=[chat],
+        schedule_kind=ScheduleKind.weekdays,
+        next_run_at=stored_utc,
+    )
+    post.timezone = "Asia/Tbilisi"
+
+    next_run = scheduler.next_run_after(post, stored_utc + timedelta(minutes=1))
+
+    assert next_run == datetime(2026, 6, 22, 0, 30, tzinfo=ZoneInfo("Asia/Tbilisi")).astimezone(UTC)
 
 
 def test_next_run_for_custom_weekdays_uses_selected_days(db_session) -> None:
