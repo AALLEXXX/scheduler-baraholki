@@ -103,10 +103,14 @@ class RateLimitEvent(Base):
 
 class TelegramSession(Base):
     __tablename__ = "telegram_sessions"
+    __table_args__ = (
+        UniqueConstraint("owner_telegram_id", "name", name="uq_telegram_sessions_owner_name"),
+        UniqueConstraint("owner_telegram_id", "phone", name="uq_telegram_sessions_owner_phone"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
+    owner_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(40))
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger)
     username: Mapped[str | None] = mapped_column(String(120))
@@ -134,8 +138,8 @@ class TargetChat(Base):
     __table_args__ = (UniqueConstraint("session_id", "telegram_chat_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
-    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))
+    owner_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("telegram_sessions.id"), nullable=False)
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger)
     title: Mapped[str] = mapped_column(String(240))
     username: Mapped[str | None] = mapped_column(String(120))
@@ -143,7 +147,7 @@ class TargetChat(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    session: Mapped[TelegramSession | None] = relationship(back_populates="chats")
+    session: Mapped[TelegramSession] = relationship(back_populates="chats")
     posts: Mapped[list[PostTarget]] = relationship(back_populates="target_chat")
 
 
@@ -170,7 +174,7 @@ class Post(Base):
         default=SessionStrategy.fixed,
     )
     default_session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))
-    created_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_by_telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_bot_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     source_bot_message_id: Mapped[int | None] = mapped_column(BigInteger)
     source_media_group_id: Mapped[str | None] = mapped_column(String(120), index=True)

@@ -179,12 +179,12 @@ class AccountService:
     def unique_session_name(self, *, owner_telegram_id: int, safe_phone: str) -> str:
         sessions = TelegramSessionRepository(self.db)
         base_name = f"tg_{owner_telegram_id}_{safe_phone or 'account'}"
-        if not sessions.name_exists(base_name):
+        if not sessions.name_exists_for_owner(owner_telegram_id=owner_telegram_id, name=base_name):
             return base_name
 
         for index in range(2, 100):
             candidate = f"{base_name}_{index}"
-            if not sessions.name_exists(candidate):
+            if not sessions.name_exists_for_owner(owner_telegram_id=owner_telegram_id, name=candidate):
                 return candidate
         return f"{base_name}_{uuid.uuid4().hex[:8]}"
 

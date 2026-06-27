@@ -174,7 +174,7 @@ Telegram-контекста будут отклонены.
 Альтернативно для служебного создания сессии есть CLI:
 
 ```bash
-docker compose run --rm worker autopost-login-session "Main Account" "+10000000000"
+docker compose run --rm worker autopost-login-session 7569215208 "Main Account" "+10000000000"
 ```
 
 ## Основной пользовательский сценарий

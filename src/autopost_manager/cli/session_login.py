@@ -12,6 +12,7 @@ from autopost_manager.models import SessionStatus, TelegramSession
 
 
 async def login_session(
+    owner_telegram_id: int,
     name: str,
     phone: str,
     *,
@@ -33,8 +34,16 @@ async def login_session(
         session_string = StringSession.save(client.session)
 
     with SessionLocal() as db:
-        existing = db.query(TelegramSession).filter(TelegramSession.name == name).one_or_none()
+        existing = (
+            db.query(TelegramSession)
+            .filter(
+                TelegramSession.owner_telegram_id == owner_telegram_id,
+                TelegramSession.name == name,
+            )
+            .one_or_none()
+        )
         if existing:
+            existing.owner_telegram_id = owner_telegram_id
             existing.phone = phone
             existing.telegram_user_id = me.id
             existing.username = me.username
@@ -44,7 +53,7 @@ async def login_session(
         else:
             db.add(
                 TelegramSession(
-                    owner_telegram_id=None,
+                    owner_telegram_id=owner_telegram_id,
                     name=name,
                     phone=phone,
                     telegram_user_id=me.id,
@@ -64,6 +73,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     import sys
 
     args = list(argv or sys.argv[1:])
-    if len(args) != 2:
-        raise SystemExit("Usage: autopost-login-session <session-name> <phone>")
-    asyncio.run(login_session(args[0], args[1]))
+    if len(args) != 3:
+        raise SystemExit("Usage: autopost-login-session <owner-telegram-id> <session-name> <phone>")
+    asyncio.run(login_session(int(args[0]), args[1], args[2]))

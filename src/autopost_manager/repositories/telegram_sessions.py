@@ -27,8 +27,14 @@ class TelegramSessionRepository:
             return None
         return session
 
-    def name_exists(self, name: str) -> bool:
-        return bool(self.db.scalar(select(TelegramSession.id).where(TelegramSession.name == name)))
+    def name_exists_for_owner(self, *, owner_telegram_id: int, name: str) -> bool:
+        return bool(
+            self.db.scalar(
+                select(TelegramSession.id)
+                .where(TelegramSession.owner_telegram_id == owner_telegram_id)
+                .where(TelegramSession.name == name)
+            )
+        )
 
     def list_for_owner(self, owner_telegram_id: int) -> list[TelegramSession]:
         return list(

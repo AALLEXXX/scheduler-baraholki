@@ -77,7 +77,7 @@ def make_session(
     *,
     owner_id: int = 111,
     name: str | None = None,
-    phone: str = "+10000000000",
+    phone: str | None = None,
     username: str | None = None,
     status: SessionStatus = SessionStatus.active,
     last_send_at: datetime | None = None,
@@ -86,7 +86,7 @@ def make_session(
     session = TelegramSession(
         owner_telegram_id=owner_id,
         name=name or f"session-{owner_id}-{suffix}",
-        phone=phone,
+        phone=phone or f"+1{int(uuid.uuid4().int % 10_000_000_000):010d}",
         telegram_user_id=owner_id + 10_000,
         username=username or f"user{owner_id}",
         api_id=123456,
