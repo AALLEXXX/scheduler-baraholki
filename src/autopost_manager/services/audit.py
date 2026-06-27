@@ -6,10 +6,10 @@ import logging
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from autopost_manager.models import Post, PublishJob, SessionStatus, TargetChat, TelegramSession
+from autopost_manager.models import SessionStatus, TargetChat, TelegramSession
+from autopost_manager.repositories.audit import AuditRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.schemas import AuditItemOut, AuditMessageOut, AuditPageOut
 from autopost_manager.telegram_client import TelegramMessageSnapshot
@@ -51,47 +51,35 @@ class AuditService:
         if not self.active_account(telegram_user_id):
             return AuditPageOut(items=[], page=page, page_size=page_size, total=0)
 
-        base_query = (
-            select(PublishJob, Post, TargetChat)
-            .join(Post, PublishJob.post_id == Post.id)
-            .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
+        audit_repository = AuditRepository(self.db)
+        rows = audit_repository.list_for_owner(
+            telegram_user_id=telegram_user_id,
+            page=page,
+            page_size=page_size,
         )
-        total = self.db.scalar(
-            select(func.count())
-            .select_from(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-        )
-        rows = self.db.execute(
-            base_query.order_by(PublishJob.updated_at.desc(), PublishJob.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        ).all()
-
         return AuditPageOut(
             items=[
                 AuditItemOut(
-                    id=job.id,
-                    post_id=post.id,
-                    post_title=post.title,
-                    post_preview=post.body,
-                    media_count=len(post.media_items),
-                    target_chat_id=chat.id,
-                    target_chat_title=chat.title,
-                    due_at=job.due_at,
-                    updated_at=job.updated_at,
-                    status=job.status,
-                    attempts=job.attempts,
-                    telegram_message_id=job.telegram_message_id,
-                    message_link=telegram_message_link(chat, job.telegram_message_id),
-                    last_error=job.last_error,
+                    id=row.job.id,
+                    post_id=row.post.id,
+                    post_title=row.post.title,
+                    post_preview=row.post.body,
+                    media_count=len(row.post.media_items),
+                    target_chat_id=row.chat.id,
+                    target_chat_title=row.chat.title,
+                    due_at=row.job.due_at,
+                    updated_at=row.job.updated_at,
+                    status=row.job.status,
+                    attempts=row.job.attempts,
+                    telegram_message_id=row.job.telegram_message_id,
+                    message_link=telegram_message_link(row.chat, row.job.telegram_message_id),
+                    last_error=row.job.last_error,
                 )
-                for job, post, chat in rows
+                for row in rows
             ],
             page=page,
             page_size=page_size,
-            total=total or 0,
+            total=audit_repository.count_for_owner(telegram_user_id),
         )
 
     async def audit_message_for_user(
@@ -100,17 +88,12 @@ class AuditService:
         telegram_user_id: int,
         job_id: uuid.UUID,
     ) -> AuditMessageOut:
-        row = self.db.execute(
-            select(PublishJob, Post, TargetChat)
-            .join(Post, PublishJob.post_id == Post.id)
-            .join(TargetChat, PublishJob.target_chat_id == TargetChat.id)
-            .where(PublishJob.id == job_id)
-            .where(Post.created_by_telegram_id == telegram_user_id)
-        ).first()
+        row = AuditRepository(self.db).fetch_for_owner(telegram_user_id=telegram_user_id, job_id=job_id)
         if not row:
             raise HTTPException(status_code=404, detail="Audit item not found")
 
-        job, _post, chat = row
+        job = row.job
+        chat = row.chat
         if not job.telegram_message_id:
             raise HTTPException(status_code=404, detail="Telegram message id is not available")
 
