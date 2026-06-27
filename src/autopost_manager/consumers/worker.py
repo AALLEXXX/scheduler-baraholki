@@ -8,7 +8,7 @@ from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
 from autopost_manager.models import TelegramSession
 from autopost_manager.services.telegram_delivery import send_post_from_session
-from autopost_manager.services.worker import WorkerService, choose_session
+from autopost_manager.services.worker import WorkerService, choose_active_session_for_job
 
 SendPost = Callable[..., Awaitable[int]]
 SendAlert = Callable[..., Awaitable[None]]
@@ -19,7 +19,7 @@ async def process_one_job(
     *,
     send_post: SendPost = send_post_from_session,
     send_alert: SendAlert = default_send_alert,
-    choose_active_session: ChooseSession = choose_session,
+    choose_active_session: ChooseSession = choose_active_session_for_job,
 ) -> bool:
     with SessionLocal() as db:
         service = WorkerService(
@@ -27,7 +27,7 @@ async def process_one_job(
             settings=get_settings(),
             send_post=send_post,
             send_alert=send_alert,
-            choose_session=choose_active_session,
+            choose_active_session=choose_active_session,
         )
         return await service.process_one_job()
 

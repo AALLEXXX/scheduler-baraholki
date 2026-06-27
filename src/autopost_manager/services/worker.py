@@ -57,13 +57,16 @@ async def alert_job_issue(
     )
 
 
-def choose_session(db: Session, job: PublishJob) -> TelegramSession | None:
+def choose_active_session_for_job(db: Session, job: PublishJob) -> TelegramSession | None:
     if job.session and job.session.status == SessionStatus.active:
         return job.session
     owner_id = job.post.created_by_telegram_id
     if owner_id is None:
         return None
     return TelegramSessionRepository(db).least_recently_used_active_for_owner(owner_id)
+
+
+choose_session = choose_active_session_for_job
 
 
 def owner_settings(db: Session, owner_id: int | None) -> UserSettings | None:
@@ -118,7 +121,7 @@ class WorkerService:
     settings: Settings
     send_post: SendPost
     send_alert: SendAlert
-    choose_session: ChooseSession
+    choose_active_session: ChooseSession
 
     async def process_one_job(self) -> bool:
         now = datetime.now(UTC)
@@ -131,7 +134,7 @@ class WorkerService:
         self.db.commit()
         self.db.refresh(job)
 
-        session = self.choose_session(self.db, job)
+        session = self.choose_active_session(self.db, job)
         if not session:
             jobs.mark_failed(job, "No active session selected for job")
             self.db.commit()

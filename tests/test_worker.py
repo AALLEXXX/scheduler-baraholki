@@ -111,7 +111,7 @@ def test_process_one_job_cancels_if_owner_is_paused_after_pick(monkeypatch, db_s
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("send_post_from_session must not be called while autopost is paused")
 
-    monkeypatch.setattr(worker, "choose_session", pause_owner_before_send)
+    monkeypatch.setattr(worker, "choose_active_session_for_job", pause_owner_before_send)
     monkeypatch.setattr(worker, "send_post_from_session", fail_if_called)
 
     processed = asyncio.run(worker.process_one_job())
