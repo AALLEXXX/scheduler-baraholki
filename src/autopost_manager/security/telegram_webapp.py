@@ -34,14 +34,14 @@ def verify_webapp_init_data(init_data: str, bot_token: str, max_age_seconds: int
     return user_id
 
 
-def require_user(x_telegram_init_data: str | None = Header(default=None)) -> int:
+def require_current_user(x_telegram_init_data: str | None = Header(default=None)) -> int:
     settings = get_settings()
     if settings.app_env == "local" and settings.allow_local_auth_bypass and not x_telegram_init_data:
         return settings.local_dev_user_id
     if not x_telegram_init_data:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing init data")
     try:
-        telegram_id = verify_webapp_init_data(
+        return verify_webapp_init_data(
             x_telegram_init_data,
             settings.bot_token,
             max_age_seconds=settings.telegram_init_data_max_age_seconds,
@@ -49,4 +49,6 @@ def require_user(x_telegram_init_data: str | None = Header(default=None)) -> int
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
-    return telegram_id
+
+def require_user(x_telegram_init_data: str | None = Header(default=None)) -> int:
+    return require_current_user(x_telegram_init_data)
