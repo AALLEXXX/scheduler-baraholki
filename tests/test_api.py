@@ -1444,13 +1444,17 @@ def test_audit_message_endpoint_fetches_exact_delivered_message(
     job.telegram_message_id = 34
     db_session.commit()
 
-    async def fake_get_message_from_session(*, session, peer, message_id):
+    async def fake_fetch_message_snapshot_from_session(*, session, peer, message_id):
         assert session.owner_telegram_id == 111
         assert peer == -1009876543210
         assert message_id == 34
         return SimpleNamespace(text="Exact delivered message", has_media=False, date=None)
 
-    monkeypatch.setattr(api_module, "get_message_from_session", fake_get_message_from_session)
+    monkeypatch.setattr(
+        api_module,
+        "fetch_message_snapshot_from_session",
+        fake_fetch_message_snapshot_from_session,
+    )
     auth_user(111)
 
     response = client.get(f"/api/audit/{job.id}/message")
@@ -1514,13 +1518,17 @@ def test_admin_can_view_user_audit_message(client, auth_user, db_session, monkey
     target_job.telegram_message_id = 45
     db_session.commit()
 
-    async def fake_get_message_from_session(*, session, peer, message_id):
+    async def fake_fetch_message_snapshot_from_session(*, session, peer, message_id):
         assert session.owner_telegram_id == 111
         assert peer == -1009876543210
         assert message_id == 45
         return SimpleNamespace(text="Alice delivered message", has_media=False, date=None)
 
-    monkeypatch.setattr(api_module, "get_message_from_session", fake_get_message_from_session)
+    monkeypatch.setattr(
+        api_module,
+        "fetch_message_snapshot_from_session",
+        fake_fetch_message_snapshot_from_session,
+    )
 
     auth_user(999)
     response = client.get(f"/api/admin/users/111/audit/{target_job.id}/message")

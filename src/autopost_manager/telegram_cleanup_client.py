@@ -64,7 +64,7 @@ async def delete_messages_from_session(
     return len(ids_to_delete)
 
 
-async def get_message_from_session(
+async def fetch_message_snapshot_from_session(
     session: TelegramSession,
     peer: int,
     message_id: int,
@@ -90,6 +90,9 @@ async def get_message_from_session(
         finally:
             remember_client_session(session, client)
             await disconnect_client(client)
+
+
+get_message_from_session = fetch_message_snapshot_from_session
 
 
 def normalize_plain_text(value: str | None) -> str:

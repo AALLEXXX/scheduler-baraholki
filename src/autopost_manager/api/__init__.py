@@ -78,7 +78,7 @@ from autopost_manager.telegram_client import (
     confirm_login_code,
     confirm_login_password,
     delete_messages_from_session,
-    get_message_from_session,
+    fetch_message_snapshot_from_session,
     list_dialog_folders_from_session,
     list_dialogs_from_session,
     logout_session_from_telegram,
@@ -92,6 +92,7 @@ request_user_id = api_runtime.request_user_id
 security_headers = api_runtime.security_headers
 startup = api_runtime.startup
 validate_runtime_settings = api_runtime.validate_runtime_settings
+get_message_from_session = fetch_message_snapshot_from_session
 
 __all__ = ["PostStatus"]
 
@@ -617,7 +618,11 @@ def list_audit(
 
 
 def audit_page_for_user(db: Session, *, telegram_user_id: int, page: int, page_size: int) -> AuditPageOut:
-    return AuditService(db=db, fetch_message=get_message_from_session, send_alert=send_alert).audit_page_for_user(
+    return AuditService(
+        db=db,
+        fetch_message=fetch_message_snapshot_from_session,
+        send_alert=send_alert,
+    ).audit_page_for_user(
         telegram_user_id=telegram_user_id,
         page=page,
         page_size=page_size,
@@ -635,7 +640,7 @@ async def get_audit_message(
 async def audit_message_for_user(db: Session, *, telegram_user_id: int, job_id: uuid.UUID) -> AuditMessageOut:
     return await AuditService(
         db=db,
-        fetch_message=get_message_from_session,
+        fetch_message=fetch_message_snapshot_from_session,
         send_alert=send_alert,
     ).audit_message_for_user(
         telegram_user_id=telegram_user_id,

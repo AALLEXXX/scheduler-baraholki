@@ -11,8 +11,10 @@ from autopost_manager.send_errors import classify_send_error as format_send_erro
 from autopost_manager.telegram_cleanup_client import TelegramMessageSnapshot
 from autopost_manager.telegram_cleanup_client import closest_ack_message_id as telegram_closest_ack_message_id
 from autopost_manager.telegram_cleanup_client import delete_messages_from_session as telegram_delete_messages_from_session
+from autopost_manager.telegram_cleanup_client import (
+    fetch_message_snapshot_from_session as telegram_fetch_message_snapshot_from_session,
+)
 from autopost_manager.telegram_cleanup_client import find_dialog_message_ids as telegram_find_dialog_message_ids
-from autopost_manager.telegram_cleanup_client import get_message_from_session as telegram_get_message_from_session
 from autopost_manager.telegram_cleanup_client import near_datetime as telegram_near_datetime
 from autopost_manager.telegram_cleanup_client import normalize_plain_text as telegram_normalize_plain_text
 from autopost_manager.telegram_dialogs import folder_chat_ids as telegram_folder_chat_ids
@@ -173,17 +175,20 @@ async def delete_messages_from_session(
     )
 
 
-async def get_message_from_session(
+async def fetch_message_snapshot_from_session(
     session: TelegramSession,
     peer: int,
     message_id: int,
 ) -> TelegramMessageSnapshot | None:
-    return await telegram_get_message_from_session(
+    return await telegram_fetch_message_snapshot_from_session(
         session=session,
         peer=peer,
         message_id=message_id,
         build_client_func=build_client,
     )
+
+
+get_message_from_session = fetch_message_snapshot_from_session
 
 
 def normalize_plain_text(value: str | None) -> str:
