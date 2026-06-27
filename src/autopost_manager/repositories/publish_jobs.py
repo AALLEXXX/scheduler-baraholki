@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import exists, func, select
@@ -26,12 +26,20 @@ class PublishJobRepository:
         )
         for job in stale_jobs:
             job.status = JobStatus.pending
+            job.locked_at = None
             job.locked_until = None
+            job.worker_id = None
             job.next_attempt_at = now
             job.last_error = "Recovered stale processing job"
         return len(stale_jobs)
 
-    def claim_next_due_job(self, now: datetime, *, lease_seconds: int) -> PublishJob | None:
+    def claim_next_due_job(
+        self,
+        now: datetime,
+        *,
+        lease_seconds: int,
+        worker_id: str = "worker",
+    ) -> PublishJob | None:
         blocked_owner_exists = exists().where(
             UserSettings.telegram_user_id == Post.created_by_telegram_id,
             (UserSettings.autopost_paused.is_(True)) | (UserSettings.banned.is_(True)),
@@ -57,32 +65,47 @@ class PublishJobRepository:
 
         job.status = JobStatus.processing
         job.attempts += 1
+        job.locked_at = now
         job.locked_until = now + timedelta(seconds=lease_seconds)
+        job.worker_id = worker_id
         job.next_attempt_at = None
         return job
 
     def mark_done(self, job: PublishJob, telegram_message_id: int) -> None:
+        now = datetime.now(UTC)
         job.status = JobStatus.done
         job.telegram_message_id = telegram_message_id
         job.last_error = None
+        job.error_code = None
+        job.error_kind = None
+        job.locked_at = None
         job.locked_until = None
+        job.worker_id = None
         job.next_attempt_at = None
+        job.completed_at = now
 
     def mark_failed(self, job: PublishJob, error: str) -> None:
         job.status = JobStatus.failed
         job.last_error = error
+        job.locked_at = None
         job.locked_until = None
+        job.worker_id = None
         job.next_attempt_at = None
 
     def mark_cancelled(self, job: PublishJob, error: str) -> None:
         job.status = JobStatus.cancelled
         job.last_error = error
+        job.locked_at = None
         job.locked_until = None
+        job.worker_id = None
+        job.cancelled_at = datetime.now(UTC)
 
     def mark_retry(self, job: PublishJob, error: str, next_attempt_at: datetime) -> None:
         job.status = JobStatus.pending
         job.last_error = error
+        job.locked_at = None
         job.locked_until = None
+        job.worker_id = None
         job.next_attempt_at = next_attempt_at
 
     def cancel_pending_for_post(self, post_id: UUID) -> int:

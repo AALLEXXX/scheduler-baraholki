@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -137,6 +138,9 @@ class TargetChat(Base):
 
 class Post(Base):
     __tablename__ = "posts"
+    __table_args__ = (
+        Index("ix_posts_owner_status_next_run", "created_by_telegram_id", "status", "next_run_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(200))
@@ -207,6 +211,7 @@ class PublishJob(Base):
     __tablename__ = "publish_jobs"
     __table_args__ = (
         UniqueConstraint("post_id", "target_chat_id", "due_at", name="uq_publish_jobs_post_target_due_at"),
+        Index("ix_publish_jobs_status_due_at", "status", "due_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -216,10 +221,17 @@ class PublishJob(Base):
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.pending)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     last_error: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    error_kind: Mapped[str | None] = mapped_column(String(80))
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    worker_id: Mapped[str | None] = mapped_column(String(120), index=True)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

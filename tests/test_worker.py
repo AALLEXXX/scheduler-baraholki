@@ -72,6 +72,10 @@ def test_process_one_job_success_marks_done(monkeypatch, db_session) -> None:
         assert refreshed.attempts == 1
         assert refreshed.telegram_message_id == 555
         assert refreshed.last_error is None
+        assert refreshed.locked_at is None
+        assert refreshed.locked_until is None
+        assert refreshed.worker_id is None
+        assert refreshed.completed_at is not None
 
 
 def test_process_one_job_skips_globally_paused_owner(db_session) -> None:
@@ -166,14 +170,18 @@ def test_recover_stale_processing_jobs_moves_job_back_to_pending(db_session) -> 
     post = make_post(db_session, owner_id=111, session=session, chats=[chat])
     job = make_job(db_session, post, chat, session=session)
     job.status = JobStatus.processing
+    job.locked_at = datetime.now(UTC) - timedelta(minutes=2)
     job.locked_until = datetime.now(UTC) - timedelta(minutes=1)
+    job.worker_id = "test-worker"
     db_session.commit()
 
     recovered = worker.recover_stale_processing_jobs(db_session, datetime.now(UTC))
 
     assert recovered == 1
     assert job.status == JobStatus.pending
+    assert job.locked_at is None
     assert job.locked_until is None
+    assert job.worker_id is None
     assert job.next_attempt_at is not None
     assert job.last_error == "Recovered stale processing job"
 
