@@ -32,7 +32,7 @@ autopost-bot = "autopost_manager.bot:main"
 autopost-scheduler = "autopost_manager.scheduler:main"
 autopost-worker = "autopost_manager.worker:main"
 autopost-login-session = "autopost_manager.session_login:main"
-autopost-db-upgrade = "autopost_manager.db:run_migrations"
+autopost-db-upgrade = "autopost_manager.database.migrations:run_migrations"
 
 [build-system]
 requires = ["setuptools>=75", "wheel"]

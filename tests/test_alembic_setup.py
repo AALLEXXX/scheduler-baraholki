@@ -15,3 +15,9 @@ def test_alembic_configuration_is_present() -> None:
 def test_project_depends_on_alembic() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"alembic>=' in pyproject
+
+
+def test_db_upgrade_entrypoint_uses_database_migrations_module() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'autopost-db-upgrade = "autopost_manager.database.migrations:run_migrations"' in pyproject
+    assert 'autopost-db-upgrade = "autopost_manager.db:run_migrations"' not in pyproject

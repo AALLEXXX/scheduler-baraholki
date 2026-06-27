@@ -7,7 +7,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from autopost_manager.config import get_settings
-from autopost_manager.db import SessionLocal, create_schema
+from autopost_manager.db import SessionLocal
 from autopost_manager.models import SessionStatus, TelegramSession
 
 
@@ -18,7 +18,6 @@ async def login_session(
     *,
     telegram_client_class=TelegramClient,
 ) -> None:
-    create_schema()
     settings = get_settings()
     settings.telegram_sessions_dir.mkdir(parents=True, exist_ok=True)
     session_path = str(settings.telegram_sessions_dir / name.replace(" ", "_").lower())
