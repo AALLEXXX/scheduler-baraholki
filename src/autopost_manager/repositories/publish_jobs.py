@@ -166,3 +166,16 @@ class PublishJobRepository:
             )
             or 0
         )
+
+    def count_done_since_for_owner(self, *, owner_telegram_id: int, since: datetime) -> int:
+        return int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(PublishJob)
+                .join(Post, PublishJob.post_id == Post.id)
+                .where(Post.created_by_telegram_id == owner_telegram_id)
+                .where(PublishJob.status == JobStatus.done)
+                .where(PublishJob.updated_at >= since)
+            )
+            or 0
+        )

@@ -3,21 +3,17 @@ from __future__ import annotations
 import asyncio
 import re
 from html import unescape
+from uuid import UUID
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
-from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
 from autopost_manager.db import SessionLocal
 from autopost_manager.messages import POST_SAVED_ACK_TEXT
-from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
-from autopost_manager.repositories.posts import PostRepository
-
-
-class DraftLimitError(ValueError):
-    pass
+from autopost_manager.models import Post
+from autopost_manager.services.drafts import DraftInput, DraftLimitError, DraftMediaInput, DraftService
 
 
 def has_telegram_sender(message: Message) -> bool:
@@ -118,19 +114,7 @@ def validate_message_limits(message: Message, html_body: str) -> None:
         raise DraftLimitError("Файл слишком большой. Загрузите медиа меньшего размера.")
 
 
-def find_album_post(db: Session, owner_id: int, media_group_id: str) -> Post | None:
-    return PostRepository(db).find_draft_album(owner_id, media_group_id)
-
-
-def draft_count(db: Session, owner_id: int) -> int:
-    return PostRepository(db).count_drafts_for_owner(owner_id)
-
-
-def media_count(db: Session, post_id) -> int:
-    return PostRepository(db).count_media(post_id)
-
-
-def save_message_as_draft(message: Message) -> tuple[Post, bool]:
+def draft_input_from_message(message: Message) -> DraftInput:
     if not message.from_user:
         raise ValueError("Message has no user")
 
@@ -139,70 +123,32 @@ def save_message_as_draft(message: Message) -> tuple[Post, bool]:
     validate_message_limits(message, html_body)
     media = extract_media(message)
     media_type = media[0] if media else None
-    media_group_id = message.media_group_id
+    return DraftInput(
+        owner_telegram_id=owner_id,
+        title=title_from_message(message, html_body, media_type),
+        html_body=html_body,
+        source_bot_chat_id=message.chat.id,
+        source_bot_message_id=message.message_id,
+        source_media_group_id=message.media_group_id,
+        media=DraftMediaInput(media_type=media[0], file_id=media[1], file_unique_id=media[2])
+        if media
+        else None,
+    )
 
+
+def save_message_as_draft(message: Message) -> tuple[Post, bool]:
+    draft_input = draft_input_from_message(message)
     with SessionLocal() as db:
-        posts = PostRepository(db)
-        post = find_album_post(db, owner_id, media_group_id) if media_group_id else None
-        created = post is None
-
-        if not post:
-            if draft_count(db, owner_id) >= get_settings().max_drafts_per_user:
-                raise DraftLimitError("Достигнут лимит черновиков. Удалите старые черновики.")
-            post = Post(
-                title=title_from_message(message, html_body, media_type),
-                body=html_body,
-                parse_mode="html",
-                status=PostStatus.draft,
-                schedule_kind=ScheduleKind.once,
-                timezone="Asia/Tbilisi",
-                session_strategy="fixed",
-                created_by_telegram_id=owner_id,
-                source_bot_chat_id=message.chat.id,
-                source_bot_message_id=message.message_id,
-                source_media_group_id=media_group_id,
-            )
-            db.add(post)
-            db.flush()
-        elif html_body and not post.body:
-            post.body = html_body
-            post.title = title_from_message(message, html_body, media_type)
-
-        if media:
-            if media_count(db, post.id) >= get_settings().max_media_items_per_post:
-                raise DraftLimitError("Слишком много медиа в одном черновике.")
-            existing_media = posts.fetch_media_by_source(
-                post_id=post.id,
-                source_bot_chat_id=message.chat.id,
-                source_bot_message_id=message.message_id,
-            )
-            if not existing_media:
-                db.add(
-                    PostMedia(
-                        post_id=post.id,
-                        source_bot_chat_id=message.chat.id,
-                        source_bot_message_id=message.message_id,
-                        media_group_id=media_group_id,
-                        media_type=media[0],
-                        file_id=media[1],
-                        file_unique_id=media[2],
-                        order_index=posts.count_media(post.id),
-                    )
-                )
-
-        db.commit()
-        db.refresh(post)
-        return post, created
+        return DraftService(db=db, settings=get_settings()).create_or_update_draft(draft_input)
 
 
-def save_ack_message(post_id, ack_message: Message) -> None:
+def save_ack_message(post_id: UUID, ack_message: Message) -> None:
     with SessionLocal() as db:
-        post = PostRepository(db).fetch_by_id(post_id)
-        if not post:
-            return
-        post.ack_bot_chat_id = ack_message.chat.id
-        post.ack_bot_message_id = ack_message.message_id
-        db.commit()
+        DraftService(db=db, settings=get_settings()).save_ack_message(
+            post_id,
+            ack_chat_id=ack_message.chat.id,
+            ack_message_id=ack_message.message_id,
+        )
 
 
 async def save_draft(message: Message) -> None:

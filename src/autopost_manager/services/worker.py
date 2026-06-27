@@ -5,12 +5,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from telethon.errors import FloodWaitError
 
 from autopost_manager.config import Settings
-from autopost_manager.models import JobStatus, Post, PublishJob, SessionStatus, TelegramSession, UserSettings
+from autopost_manager.models import PublishJob, SessionStatus, TelegramSession, UserSettings
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.repositories.telegram_sessions import TelegramSessionRepository
 from autopost_manager.repositories.user_settings import UserSettingsRepository
@@ -77,17 +76,7 @@ def sent_today(db: Session, owner_id: int | None) -> int:
     if owner_id is None:
         return 0
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(PublishJob)
-            .join(Post, PublishJob.post_id == Post.id)
-            .where(Post.created_by_telegram_id == owner_id)
-            .where(PublishJob.status == JobStatus.done)
-            .where(PublishJob.updated_at >= today)
-        )
-        or 0
-    )
+    return PublishJobRepository(db).count_done_since_for_owner(owner_telegram_id=owner_id, since=today)
 
 
 def next_day_start() -> datetime:
