@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import Settings
-from autopost_manager.models import Post, PostMedia, PostStatus, ScheduleKind
+from autopost_manager.models import ParseMode, Post, PostMedia, PostStatus, ScheduleKind, SessionStrategy
 from autopost_manager.repositories.posts import PostRepository
 
 
@@ -55,11 +55,11 @@ class DraftService:
             post = Post(
                 title=draft_input.title,
                 body=draft_input.html_body,
-                parse_mode="html",
+                parse_mode=ParseMode.html,
                 status=PostStatus.draft,
                 schedule_kind=ScheduleKind.once,
                 timezone="Asia/Tbilisi",
-                session_strategy="fixed",
+                session_strategy=SessionStrategy.fixed,
                 created_by_telegram_id=draft_input.owner_telegram_id,
                 source_bot_chat_id=draft_input.source_bot_chat_id,
                 source_bot_message_id=draft_input.source_bot_message_id,

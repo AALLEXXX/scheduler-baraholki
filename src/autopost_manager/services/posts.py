@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import Settings
-from autopost_manager.models import Post, PostStatus, ScheduleKind
+from autopost_manager.models import ParseMode, Post, PostStatus, ScheduleKind, SessionStrategy
 from autopost_manager.repositories.posts import PostRepository
 from autopost_manager.repositories.publish_jobs import PublishJobRepository
 from autopost_manager.repositories.target_chats import TargetChatRepository
@@ -51,14 +51,14 @@ def post_to_out(post: Post) -> PostOut:
         id=post.id,
         title=post.title,
         body=post.body,
-        parse_mode=post.parse_mode,
+        parse_mode=ParseMode(post.parse_mode) if post.parse_mode else None,
         status=post.status,
         schedule_kind=post.schedule_kind,
         next_run_at=post.next_run_at,
         interval_minutes=post.interval_minutes,
         schedule_weekdays=parse_schedule_weekdays(post.schedule_weekdays),
         timezone=post.timezone,
-        session_strategy=post.session_strategy,
+        session_strategy=SessionStrategy(post.session_strategy),
         default_session_id=post.default_session_id,
         target_chat_ids=[target.target_chat_id for target in post.targets],
         media=[

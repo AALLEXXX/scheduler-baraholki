@@ -35,9 +35,21 @@ def test_post_schedule_update_rejects_invalid_weekday() -> None:
         )
 
 
+def test_post_create_accepts_domain_parse_modes_and_session_strategies() -> None:
+    post = PostCreate(
+        title="Title",
+        body="Body",
+        parse_mode="markdown",
+        session_strategy="least_recently_used",
+    )
+
+    assert post.parse_mode == "markdown"
+    assert post.session_strategy == "least_recently_used"
+
+
 def test_post_create_rejects_unsupported_parse_mode_and_session_strategy() -> None:
     with pytest.raises(ValidationError):
-        PostCreate(title="Title", body="Body", parse_mode="markdown")
+        PostCreate(title="Title", body="Body", parse_mode="unsupported")
 
     with pytest.raises(ValidationError):
         PostCreate(title="Title", body="Body", session_strategy="round-robin")

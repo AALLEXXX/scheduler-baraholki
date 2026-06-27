@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from autopost_manager.models import ParseMode as ParseMode
+from autopost_manager.models import SessionStrategy as SessionStrategy
 
 MAX_TARGET_CHAT_IDS = 15
 MAX_SCHEDULE_WEEKDAYS = 7
-ParseMode = Literal["html"]
-SessionStrategy = Literal["fixed"]
 
 
 def normalize_schedule_weekdays(values: list[int]) -> list[int]:

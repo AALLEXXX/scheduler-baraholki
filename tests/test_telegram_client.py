@@ -231,6 +231,28 @@ def test_send_post_from_session_sends_media_with_caption(monkeypatch, db_session
     assert fake_client.sent == []
 
 
+def test_send_post_from_session_sends_plain_text_without_parse_mode(monkeypatch, db_session) -> None:
+    session = make_session(db_session, owner_id=111)
+    post = make_post(db_session, owner_id=111, session=session, chats=[], body="plain text")
+    post.parse_mode = "plain"
+    db_session.commit()
+    fake_client = AuthorizedClient()
+
+    monkeypatch.setattr(telegram_client, "build_client", lambda _session: fake_client)
+
+    message_id = asyncio.run(
+        telegram_client.send_post_from_session(
+            db=db_session,
+            session=session,
+            chat_id=-1001,
+            post=post,
+        )
+    )
+
+    assert message_id == 999
+    assert fake_client.sent == [(-1001, "plain text", None)]
+
+
 def test_send_post_from_session_forwards_matching_long_album_from_bot_dialog(
     monkeypatch,
     db_session,

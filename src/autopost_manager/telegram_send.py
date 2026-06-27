@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from autopost_manager.config import get_settings
-from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
+from autopost_manager.models import ParseMode, Post, PostMedia, SessionStatus, TelegramSession
 from autopost_manager.telegram_cleanup_client import near_datetime, normalize_plain_text
 from autopost_manager.telegram_media import extract_sent_message_id
 from autopost_manager.telegram_media import send_files_with_optional_text
@@ -23,6 +23,12 @@ from autopost_manager.telegram_runtime import (
 BuildClient = Callable[[TelegramSession], Any]
 DownloadBotFile = Callable[[str, str], Awaitable[str]]
 Sleep = Callable[[float], Awaitable[None]]
+
+
+def telegram_parse_mode(parse_mode: str | ParseMode | None) -> str | None:
+    if parse_mode == ParseMode.plain:
+        return None
+    return str(parse_mode) if parse_mode else None
 
 
 async def send_message_from_session(
@@ -78,7 +84,7 @@ async def send_post_from_session(
             session=session,
             chat_id=chat_id,
             text=post.body,
-            parse_mode=post.parse_mode,
+            parse_mode=telegram_parse_mode(post.parse_mode),
             build_client_func=build_client_func,
             sleep=sleep,
         )
@@ -89,7 +95,7 @@ async def send_post_from_session(
         chat_id=chat_id,
         media_items=media_items,
         text=post.body,
-        parse_mode=post.parse_mode,
+        parse_mode=telegram_parse_mode(post.parse_mode),
         source_created_at=post.created_at,
         build_client_func=build_client_func,
         download_bot_file_func=download_bot_file_func,

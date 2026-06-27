@@ -54,6 +54,17 @@ class ScheduleKind(StrEnum):
     custom_weekdays = "custom_weekdays"
 
 
+class ParseMode(StrEnum):
+    html = "html"
+    markdown = "markdown"
+    plain = "plain"
+
+
+class SessionStrategy(StrEnum):
+    fixed = "fixed"
+    least_recently_used = "least_recently_used"
+
+
 class JobStatus(StrEnum):
     pending = "pending"
     processing = "processing"
@@ -145,7 +156,7 @@ class Post(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
-    parse_mode: Mapped[str | None] = mapped_column(String(20), default="html")
+    parse_mode: Mapped[ParseMode | None] = mapped_column(String(20), default=ParseMode.html)
     status: Mapped[PostStatus] = mapped_column(Enum(PostStatus), default=PostStatus.draft)
     schedule_kind: Mapped[ScheduleKind] = mapped_column(
         Enum(ScheduleKind), default=ScheduleKind.once
@@ -154,7 +165,10 @@ class Post(Base):
     interval_minutes: Mapped[int | None] = mapped_column(Integer)
     schedule_weekdays: Mapped[str | None] = mapped_column(String(40))
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Tbilisi")
-    session_strategy: Mapped[str] = mapped_column(String(40), default="fixed")
+    session_strategy: Mapped[SessionStrategy] = mapped_column(
+        String(40),
+        default=SessionStrategy.fixed,
+    )
     default_session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("telegram_sessions.id"))
     created_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
     source_bot_chat_id: Mapped[int | None] = mapped_column(BigInteger)

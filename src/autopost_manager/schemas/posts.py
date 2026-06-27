@@ -17,14 +17,14 @@ from autopost_manager.schemas.common import normalize_schedule_weekdays
 class PostCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=4096)
-    parse_mode: ParseMode | None = "html"
+    parse_mode: ParseMode | None = ParseMode.html
     status: PostStatus = PostStatus.draft
     schedule_kind: ScheduleKind = ScheduleKind.once
     next_run_at: datetime | None = None
     interval_minutes: int | None = Field(default=None, ge=1)
     schedule_weekdays: list[int] = Field(default_factory=list, max_length=MAX_SCHEDULE_WEEKDAYS)
     timezone: str = "Asia/Tbilisi"
-    session_strategy: SessionStrategy = "fixed"
+    session_strategy: SessionStrategy = SessionStrategy.fixed
     default_session_id: uuid.UUID | None = None
     target_chat_ids: list[uuid.UUID] = Field(default_factory=list)
     spam_risk_acknowledged: bool = False
