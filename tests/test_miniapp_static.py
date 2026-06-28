@@ -14,7 +14,7 @@ def read(name: str) -> str:
 
 
 def test_miniapp_javascript_has_valid_syntax(tmp_path) -> None:
-    for script in ("app.js", "js/api-client.js"):
+    for script in ("app.js", "js/api-client.js", "js/i18n.js"):
         module_path = tmp_path / Path(script).name.replace(".js", ".mjs")
         module_path.write_text(read(script), encoding="utf-8")
         result = subprocess.run(
@@ -134,6 +134,7 @@ def test_miniapp_can_paginate_and_delete_posts() -> None:
 def test_miniapp_queue_has_details_editing_and_precise_pause_controls() -> None:
     html = read("index.html")
     js = read("app.js")
+    i18n_js = read("js/i18n.js")
     css = read("styles.css")
 
     for element_id in [
@@ -155,7 +156,7 @@ def test_miniapp_queue_has_details_editing_and_precise_pause_controls() -> None:
     assert 'aria-label="${t("delete.button")}"' in js
     assert "settings.pauseButton" in js
     assert "settings.resumeButton" in js
-    assert "Pause sending" in js
+    assert "Pause sending" in i18n_js
     assert "togglePausePost" in js
     assert "openEditPost" in js
     assert 'method: "PATCH"' in js
@@ -196,6 +197,7 @@ def test_miniapp_auto_syncs_groups_and_can_pause_or_revoke_account() -> None:
 def test_miniapp_defaults_to_english_and_can_switch_to_russian() -> None:
     html = read("index.html")
     js = read("app.js")
+    i18n_js = read("js/i18n.js")
     css = read("styles.css")
 
     assert '<html lang="en">' in html
@@ -208,22 +210,23 @@ def test_miniapp_defaults_to_english_and_can_switch_to_russian() -> None:
     assert 'data-i18n="settings.languageTitle"' in html
     assert 'data-i18n-placeholder="groups.search"' in html
     assert 'data-i18n-aria-label="action.refresh"' in html
-    assert 'const languageStorageKey = "autopost-manager-language";' in js
-    assert 'const supportedLanguages = ["en", "ru"];' in js
+    assert 'import { languageStorageKey, supportedLanguages, translations } from "./js/i18n.js' in js
+    assert 'export const languageStorageKey = "autopost-manager-language";' in i18n_js
+    assert 'export const supportedLanguages = ["en", "ru"];' in i18n_js
     assert 'language: localStorage.getItem(languageStorageKey) || "en"' in js
     assert "function applyTranslations" in js
     assert "function setLanguage" in js
     assert 'document.querySelector("#language-select").addEventListener("change"' in js
-    assert '"settings.pauseTitle": "Autoposting"' in js
-    assert '"settings.pauseTitle": "Автопостинг"' in js
-    assert '"settings.pauseButton": "Pause sending"' in js
-    assert '"settings.pauseButton": "Остановить отправки"' in js
+    assert '"settings.pauseTitle": "Autoposting"' in i18n_js
+    assert '"settings.pauseTitle": "Автопостинг"' in i18n_js
+    assert '"settings.pauseButton": "Pause sending"' in i18n_js
+    assert '"settings.pauseButton": "Остановить отправки"' in i18n_js
     assert 'data-i18n="settings.limits"' in html
     assert 'class="settings-limits-grid"' in html
     assert 'data-i18n="limits.targetsValue">15 max' in html
-    assert '"limits.targetsValue": "до 15"' in js
-    assert '"limits.accountIntervalValue": "30 сек"' in js
-    assert '"limits.queueValue": "300 задач"' in js
+    assert '"limits.targetsValue": "до 15"' in i18n_js
+    assert '"limits.accountIntervalValue": "30 сек"' in i18n_js
+    assert '"limits.queueValue": "300 задач"' in i18n_js
     assert ".settings-section-label" in css
     assert ".settings-control" in css
     assert ".settings-limits-grid" in css
@@ -297,13 +300,14 @@ def test_miniapp_typography_avoids_heavy_font_weights() -> None:
 
 def test_miniapp_warns_when_selecting_more_than_fifteen_chats() -> None:
     js = read("app.js")
+    i18n_js = read("js/i18n.js")
 
     assert "riskyChatSelectionLimit = 15" in js
     assert "showLargeChatSelectionWarning" in js
     assert "warnIfLargeChatSelection(previousCount, state.selectedChatIds.size)" in js
     assert "warnIfLargeChatSelection(previousCount, state.editSelectedChatIds.size)" in js
     assert "spam.largeSelection" in js
-    assert "Continue at your own risk" in js
+    assert "Continue at your own risk" in i18n_js
 
 
 def test_miniapp_has_audit_tab_with_top_pagination() -> None:
