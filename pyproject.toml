@@ -23,6 +23,7 @@ dev = [
   "pytest>=8.3,<9",
   "pytest-cov>=6,<8",
   "pytest-xdist>=3,<4",
+  "mypy>=1.13,<2",
   "ruff>=0.8,<1",
 ]
 
@@ -57,3 +58,16 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = [
+  "src/autopost_manager/database/connection.py",
+  "src/autopost_manager/schedule.py",
+  "src/autopost_manager/send_errors.py",
+]
+
+[[tool.mypy.overrides]]
+module = ["telethon.*"]
+ignore_missing_imports = true

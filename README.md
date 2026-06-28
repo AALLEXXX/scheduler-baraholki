@@ -239,12 +239,16 @@ PYTHONPATH=src .venv/bin/python -m pytest --cov=autopost_manager --cov-report=te
 
 ```bash
 node --check miniapp/app.js
+node --check miniapp/js/api-client.js
+node --check miniapp/js/i18n.js
+node --check miniapp/js/telegram-webapp.js
 ```
 
-Проверить стиль Python:
+Проверить стиль и типы Python:
 
 ```bash
 .venv/bin/ruff check src tests
+.venv/bin/mypy
 ```
 
 Локально поднять весь стек:
@@ -390,14 +394,21 @@ alembic revision -m "describe change"
 
 ```bash
 node --check miniapp/app.js
+node --check miniapp/js/api-client.js
+node --check miniapp/js/i18n.js
+node --check miniapp/js/telegram-webapp.js
 PYTHONPATH=src .venv/bin/python -m pytest
 .venv/bin/ruff check src tests
+.venv/bin/mypy
 ```
 
 Если правка затрагивает только Mini App, минимум:
 
 ```bash
 node --check miniapp/app.js
+node --check miniapp/js/api-client.js
+node --check miniapp/js/i18n.js
+node --check miniapp/js/telegram-webapp.js
 PYTHONPATH=src .venv/bin/python -m pytest tests/test_miniapp_static.py
 ```
 
