@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -53,9 +54,9 @@ def next_run_after(post: Post, now: datetime) -> datetime | None:
     return None
 
 
+@dataclass(kw_only=True, frozen=True, slots=True)
 class SchedulerService:
-    def __init__(self, db_factory: Callable[[], Session] = SessionLocal) -> None:
-        self.db_factory = db_factory
+    db_factory: Callable[[], Session] = SessionLocal
 
     def enqueue_due_posts(self, now: datetime | None = None) -> int:
         current_time = now or datetime.now(UTC)

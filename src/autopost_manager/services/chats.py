@@ -20,7 +20,7 @@ FolderLoader = Callable[..., Awaitable[list[dict[str, object]]]]
 SendAlert = Callable[..., Awaitable[None]]
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class ChatService:
     db: Session
     list_dialogs: DialogLoader

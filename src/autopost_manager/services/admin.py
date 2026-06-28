@@ -37,7 +37,7 @@ def failed_total(db: Session, *, telegram_user_id: int | None = None) -> int:
     return AdminRepository(db).failed_total(telegram_user_id=telegram_user_id)
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class AdminService:
     db: Session
 

@@ -35,7 +35,7 @@ def collect_source_message_refs(post: Post) -> set[tuple[int, int]]:
     return refs
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class TelegramCleanupService:
     db: Session | None
     bot_token: str

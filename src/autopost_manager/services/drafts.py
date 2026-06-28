@@ -32,7 +32,7 @@ class DraftInput:
     media: DraftMediaInput | None
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class DraftService:
     db: Session
     settings: Settings

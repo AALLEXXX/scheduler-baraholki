@@ -68,7 +68,7 @@ def post_to_out(post: Post) -> PostOut:
     )
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class PostService:
     db: Session
     settings: Settings

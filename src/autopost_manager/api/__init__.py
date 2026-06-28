@@ -240,7 +240,7 @@ def check_rate_limit(
     limit: int,
     window_seconds: int,
 ) -> None:
-    AccountService(db).check_rate_limit(
+    AccountService(db=db).check_rate_limit(
         scope=scope,
         key=key,
         limit=limit,
@@ -257,11 +257,11 @@ def phone_digits(phone: str | None) -> str:
 
 
 def find_session_by_phone(db: Session, *, owner_telegram_id: int, phone: str) -> TelegramSession | None:
-    return AccountService(db).find_session_by_phone(owner_telegram_id=owner_telegram_id, phone=phone)
+    return AccountService(db=db).find_session_by_phone(owner_telegram_id=owner_telegram_id, phone=phone)
 
 
 def unique_session_name(db: Session, *, owner_telegram_id: int, safe_phone: str) -> str:
-    return AccountService(db).unique_session_name(owner_telegram_id=owner_telegram_id, safe_phone=safe_phone)
+    return AccountService(db=db).unique_session_name(owner_telegram_id=owner_telegram_id, safe_phone=safe_phone)
 
 
 def sent_since(db: Session, *, telegram_user_id: int | None = None, since: datetime | None = None) -> int:
@@ -384,14 +384,14 @@ def get_user_settings(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> UserSettingsOut:
-    return AccountService(db).user_settings(telegram_user_id=telegram_user_id)
+    return AccountService(db=db).user_settings(telegram_user_id=telegram_user_id)
 
 
 def list_sessions(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[TelegramSession]:
-    return AccountService(db).list_sessions(telegram_user_id=telegram_user_id)
+    return AccountService(db=db).list_sessions(telegram_user_id=telegram_user_id)
 
 
 async def start_account_login(
@@ -399,7 +399,7 @@ async def start_account_login(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    return await AccountService(db).start_login(
+    return await AccountService(db=db).start_login(
         payload=payload,
         telegram_user_id=telegram_user_id,
         settings=get_settings(),
@@ -413,7 +413,7 @@ async def confirm_account_code(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    return await AccountService(db).confirm_code(
+    return await AccountService(db=db).confirm_code(
         payload=payload,
         telegram_user_id=telegram_user_id,
         confirm_login_code=confirm_login_code,
@@ -426,7 +426,7 @@ async def confirm_account_password(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountLoginOut:
-    return await AccountService(db).confirm_password(
+    return await AccountService(db=db).confirm_password(
         payload=payload,
         telegram_user_id=telegram_user_id,
         confirm_login_password=confirm_login_password,
@@ -442,7 +442,7 @@ def pause_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountPauseOut:
-    return AccountService(db).pause_autoposting(telegram_user_id=telegram_user_id)
+    return AccountService(db=db).pause_autoposting(telegram_user_id=telegram_user_id)
 
 
 def logout_account(
@@ -456,14 +456,14 @@ def resume_account(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountPauseOut:
-    return AccountService(db).resume_autoposting(telegram_user_id=telegram_user_id)
+    return AccountService(db=db).resume_autoposting(telegram_user_id=telegram_user_id)
 
 
 async def revoke_account_session(
     telegram_user_id: int = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> AccountRevokeOut:
-    return await AccountService(db).revoke_account(
+    return await AccountService(db=db).revoke_account(
         telegram_user_id=telegram_user_id,
         logout_session=logout_session_from_telegram,
         delete_session_files=delete_session_files,
@@ -668,7 +668,7 @@ async def admin_get_user_audit_message(
 
 
 def admin_user_out(db: Session, telegram_user_id: int) -> AdminUserOut:
-    return AdminService(db).admin_user_out(telegram_user_id)
+    return AdminService(db=db).admin_user_out(telegram_user_id)
 
 
 def admin_list_users(
@@ -678,7 +678,7 @@ def admin_list_users(
     _admin_id: int = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserPageOut:
-    return AdminService(db).list_users(page=page, page_size=page_size, query=query)
+    return AdminService(db=db).list_users(page=page, page_size=page_size, query=query)
 
 
 def admin_update_user(
@@ -687,14 +687,14 @@ def admin_update_user(
     _admin_id: int = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserOut:
-    return AdminService(db).update_user(telegram_user_id, payload)
+    return AdminService(db=db).update_user(telegram_user_id, payload)
 
 
 def admin_stats(
     _admin_id: int = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminStatsOut:
-    return AdminService(db).stats()
+    return AdminService(db=db).stats()
 
 
 def _create_application():

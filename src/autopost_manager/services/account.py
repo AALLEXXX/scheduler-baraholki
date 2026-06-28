@@ -117,7 +117,7 @@ def normalize_phone_key(phone: str) -> str:
     return digits[-12:] if digits else "unknown"
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class AccountService:
     db: Session
 

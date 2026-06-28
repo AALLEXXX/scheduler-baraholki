@@ -115,7 +115,7 @@ def retry_delay(exc: Exception, attempts: int) -> timedelta | None:
     return timedelta(seconds=min(900, 60 * attempts))
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class WorkerService:
     db: Session
     settings: Settings

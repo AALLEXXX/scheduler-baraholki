@@ -32,7 +32,7 @@ def telegram_message_link(chat: TargetChat, message_id: int | None) -> str | Non
     return None
 
 
-@dataclass(slots=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class AuditService:
     db: Session
     fetch_message: FetchMessage
