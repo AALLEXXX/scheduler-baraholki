@@ -29,7 +29,7 @@ async def login_session(
         settings.telegram_api_hash,
     ) as client:
         await client.start(phone=phone)
-        me = await client.get_me()
+        telegram_user = await client.get_me()
         session_string = StringSession.save(client.session)
 
     with SessionLocal() as db:
@@ -44,8 +44,8 @@ async def login_session(
         if existing:
             existing.owner_telegram_id = owner_telegram_id
             existing.phone = phone
-            existing.telegram_user_id = me.id
-            existing.username = me.username
+            existing.telegram_user_id = telegram_user.id
+            existing.username = telegram_user.username
             existing.status = SessionStatus.active
             existing.session_path = session_path
             existing.session_string = session_string
@@ -55,8 +55,8 @@ async def login_session(
                     owner_telegram_id=owner_telegram_id,
                     name=name,
                     phone=phone,
-                    telegram_user_id=me.id,
-                    username=me.username,
+                    telegram_user_id=telegram_user.id,
+                    username=telegram_user.username,
                     status=SessionStatus.active,
                     session_path=session_path,
                     session_string=session_string,
@@ -65,7 +65,7 @@ async def login_session(
             )
         db.commit()
 
-    print(f"Authorized session '{name}' as {me.id} @{me.username or ''}".strip())
+    print(f"Authorized session '{name}' as {telegram_user.id} @{telegram_user.username or ''}".strip())
 
 
 def main(argv: Sequence[str] | None = None) -> None:

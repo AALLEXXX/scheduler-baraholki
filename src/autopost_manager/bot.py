@@ -92,12 +92,12 @@ async def save_draft(message: Message) -> None:
 async def run_bot() -> None:
     settings = get_settings()
     bot = Bot(token=settings.bot_token)
-    dp = Dispatcher()
-    dp.message.register(start, Command("start"))
-    dp.message.register(status, Command("status"))
-    dp.message.register(start, F.text == "panel")
-    dp.message.register(save_draft)
-    await dp.start_polling(bot)
+    dispatcher = Dispatcher()
+    dispatcher.message.register(start, Command("start"))
+    dispatcher.message.register(status, Command("status"))
+    dispatcher.message.register(start, F.text == "panel")
+    dispatcher.message.register(save_draft)
+    await dispatcher.start_polling(bot)
 
 
 def main() -> None:

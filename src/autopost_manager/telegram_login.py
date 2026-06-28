@@ -72,8 +72,8 @@ async def confirm_login_code(
                 )
             except SessionPasswordNeededError:
                 return False, None
-            me = await telegram_timeout(client.get_me(), 20)
-            return True, me
+            telegram_user = await telegram_timeout(client.get_me(), 20)
+            return True, telegram_user
         finally:
             remember_client_session(session, client)
             await disconnect_client(client)

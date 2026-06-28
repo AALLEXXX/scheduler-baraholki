@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import fcntl
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -58,7 +59,7 @@ def legacy_session_string(session_path: str | None) -> str:
             return StringSession.save(legacy_session)
         finally:
             legacy_session.close()
-    except Exception:
+    except (OSError, sqlite3.DatabaseError, ValueError):
         return ""
 
 
