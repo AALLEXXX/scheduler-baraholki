@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from telethon.errors import PasswordHashInvalidError
+from telethon.errors import PasswordHashInvalidError, PhoneCodeInvalidError, PhoneNumberInvalidError, RPCError
 
 from autopost_manager import api as api_module
 from autopost_manager.db import SessionLocal
@@ -467,7 +467,7 @@ def test_start_login_updates_existing_session_and_reports_send_error(
         assert sessions[0].phone_code_hash == "updated-hash"
 
     async def failing_request_login_code(_session, *, force_sms=False):
-        raise RuntimeError("telegram rejected phone")
+        raise PhoneNumberInvalidError(request=None)
 
     monkeypatch.setattr(api_module, "request_login_code", failing_request_login_code)
 
@@ -477,13 +477,12 @@ def test_start_login_updates_existing_session_and_reports_send_error(
     )
 
     assert response.status_code == 422
-    assert "Не удалось отправить код Telegram" in response.text
-    assert "telegram rejected phone" not in response.text
+    assert "Telegram не принял номер" in response.text
     assert len(alerts) == 1
     assert alerts[0]["title"] == "Telegram login error"
     assert alerts[0]["fields"]["action"] == "start-login"
     assert alerts[0]["fields"]["owner_telegram_id"] == 111
-    assert alerts[0]["fields"]["error_type"] == "RuntimeError"
+    assert alerts[0]["fields"]["error_type"] == "PhoneNumberInvalidError"
 
 
 def test_start_login_enforces_code_request_cooldown(
@@ -597,7 +596,7 @@ def test_confirm_code_rejects_missing_foreign_and_telegram_errors(
     auth_user(111)
 
     async def failing_confirm_login_code(_session, _code):
-        raise RuntimeError("bad code")
+        raise PhoneCodeInvalidError(request=None)
 
     monkeypatch.setattr(api_module, "confirm_login_code", failing_confirm_login_code)
     response = client.post(
@@ -605,8 +604,7 @@ def test_confirm_code_rejects_missing_foreign_and_telegram_errors(
         json={"session_id": str(session.id), "code": "00000"},
     )
     assert response.status_code == 422
-    assert "Не удалось подтвердить код Telegram" in response.text
-    assert "bad code" not in response.text
+    assert "Telegram не принял код" in response.text
 
 
 def test_confirm_password_success_foreign_and_telegram_error(
@@ -628,7 +626,7 @@ def test_confirm_password_success_foreign_and_telegram_error(
     auth_user(111)
 
     async def failing_confirm_password(_session, _password):
-        raise RuntimeError("wrong password")
+        raise RPCError(request=None, message="PASSWORD_CHECK_FAILED")
 
     monkeypatch.setattr(api_module, "confirm_login_password", failing_confirm_password)
     response = client.post(
@@ -637,7 +635,7 @@ def test_confirm_password_success_foreign_and_telegram_error(
     )
     assert response.status_code == 422
     assert "Не удалось подтвердить пароль 2FA" in response.text
-    assert "wrong password" not in response.text
+    assert "PASSWORD_CHECK_FAILED" not in response.text
 
     async def invalid_telegram_password(_session, _password):
         raise PasswordHashInvalidError(request=None)

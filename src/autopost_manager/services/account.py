@@ -18,6 +18,7 @@ from telethon.errors import (
     PhoneNumberFloodError,
     PhoneNumberInvalidError,
     PhonePasswordFloodError,
+    RPCError,
     SendCodeUnavailableError,
 )
 
@@ -52,6 +53,7 @@ RATE_LIMIT_LOGIN_START_WINDOW_SECONDS = 10 * 60
 RATE_LIMIT_LOGIN_CONFIRM_WINDOW_SECONDS = 15 * 60
 RATE_LIMIT_LOGIN_START_ATTEMPTS = 3
 RATE_LIMIT_LOGIN_CONFIRM_ATTEMPTS = 5
+TELEGRAM_LOGIN_ERRORS: tuple[type[Exception], ...] = (RPCError, TimeoutError, OSError)
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +243,7 @@ class AccountService:
 
         try:
             code_request = await request_login_code(session, force_sms=payload.force_sms)
-        except Exception as exc:
+        except TELEGRAM_LOGIN_ERRORS as exc:
             session.phone_code_hash = None
             self.db.commit()
             await self.raise_login_error(stage="start-login", session=session, exc=exc, send_alert=send_alert)
@@ -287,7 +289,7 @@ class AccountService:
 
         try:
             completed, me = await confirm_login_code(session, payload.code)
-        except Exception as exc:
+        except TELEGRAM_LOGIN_ERRORS as exc:
             session.phone_code_hash = None
             self.db.commit()
             await self.raise_login_error(stage="confirm-code", session=session, exc=exc, send_alert=send_alert)
@@ -329,7 +331,7 @@ class AccountService:
 
         try:
             me = await confirm_login_password(session, payload.password)
-        except Exception as exc:
+        except TELEGRAM_LOGIN_ERRORS as exc:
             session.phone_code_hash = None
             self.db.commit()
             await self.raise_login_error(stage="confirm-password", session=session, exc=exc, send_alert=send_alert)
