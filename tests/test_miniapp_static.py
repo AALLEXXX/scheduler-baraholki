@@ -13,16 +13,19 @@ def read(name: str) -> str:
     return (MINIAPP / name).read_text(encoding="utf-8")
 
 
-def test_miniapp_javascript_has_valid_syntax() -> None:
-    result = subprocess.run(
-        ["node", "--check", str(MINIAPP / "app.js")],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def test_miniapp_javascript_has_valid_syntax(tmp_path) -> None:
+    for script in ("app.js", "js/api-client.js"):
+        module_path = tmp_path / Path(script).name.replace(".js", ".mjs")
+        module_path.write_text(read(script), encoding="utf-8")
+        result = subprocess.run(
+            ["node", "--check", str(module_path)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
-    assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, result.stderr
 
 
 def test_miniapp_removes_manual_account_selector_and_uses_connected_account() -> None:
@@ -231,6 +234,7 @@ def test_miniapp_defaults_to_english_and_can_switch_to_russian() -> None:
 def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     html = read("index.html")
     js = read("app.js")
+    api_js = read("js/api-client.js")
     css = read("styles.css")
 
     for element_id in [
@@ -247,9 +251,10 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "groupPageSize: 10" in js
     assert "selectedFolderId" in js
     assert 'api("folders")' in js
-    assert 'const restApiBase = `${apiPrefix}/rest/autopost`' in js
-    assert 'const rpcApiBase = `${apiPrefix}/rpc/autopost`' in js
-    assert "function apiBaseForPath(cleanPath)" in js
+    assert 'import { api as requestApi } from "./js/api-client.js' in js
+    assert 'const restApiBase = `${apiPrefix}/rest/autopost`' in api_js
+    assert 'const rpcApiBase = `${apiPrefix}/rpc/autopost`' in api_js
+    assert "function apiBaseForPath(cleanPath)" in api_js
     assert "function renderFolderPicker" in js
     assert ".folder-chip" in css
     assert "flex-wrap: wrap" in css

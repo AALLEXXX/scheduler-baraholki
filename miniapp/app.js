@@ -1,7 +1,6 @@
+import { api as requestApi } from "./js/api-client.js?v=20260626-12";
+
 const tg = window.Telegram?.WebApp;
-const apiPrefix = window.location.pathname.startsWith("/scheduler") ? "/scheduler" : "";
-const restApiBase = `${apiPrefix}/rest/autopost`;
-const rpcApiBase = `${apiPrefix}/rpc/autopost`;
 const riskyChatSelectionLimit = 15;
 const languageStorageKey = "autopost-manager-language";
 const supportedLanguages = ["en", "ru"];
@@ -602,10 +601,6 @@ function isAdmin() {
   return Boolean(state.config?.is_admin);
 }
 
-function telegramInitData() {
-  return window.Telegram?.WebApp?.initData || "";
-}
-
 function draftPosts() {
   return state.posts.filter((post) => post.status === "draft");
 }
@@ -637,50 +632,8 @@ function setDraftHelpVisible(visible) {
   button.setAttribute("aria-expanded", String(visible));
 }
 
-function headers() {
-  return {
-    "Content-Type": "application/json",
-    "X-Telegram-Init-Data": telegramInitData(),
-  };
-}
-
 async function api(path, options = {}) {
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  const response = await fetch(`${apiBaseForPath(cleanPath)}${cleanPath}`, {
-    ...options,
-    headers: { ...headers(), ...(options.headers || {}) },
-  });
-
-  if (!response.ok) {
-    let message = response.statusText;
-    const text = await response.text();
-    try {
-      const parsed = JSON.parse(text);
-      if (typeof parsed.detail === "string") {
-        message = parsed.detail;
-      } else if (Array.isArray(parsed.detail)) {
-        message = parsed.detail.map((item) => item.msg || t("notice.genericValidation")).join("\n");
-      } else {
-        message = t("notice.genericActionError");
-      }
-    } catch {
-      message = text || message;
-    }
-    throw new Error(message);
-  }
-  return response.json();
-}
-
-function apiBaseForPath(cleanPath) {
-  const pathOnly = cleanPath.split("?")[0];
-  if (
-    pathOnly.startsWith("/account/") ||
-    /^\/sessions\/[^/]+\/sync-chats$/.test(pathOnly) ||
-    /^\/posts\/[^/]+\/(schedule|pause|resume|enqueue-now)$/.test(pathOnly)
-  ) {
-    return rpcApiBase;
-  }
-  return restApiBase;
+  return requestApi(path, options, t);
 }
 
 function setBusy(button, busy, text) {
