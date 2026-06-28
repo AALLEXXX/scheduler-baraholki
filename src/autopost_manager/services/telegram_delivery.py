@@ -5,8 +5,6 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from autopost_manager.crypto import encrypt_session_string
 from autopost_manager.models import Post, PostMedia, SessionStatus, TelegramSession
 from autopost_manager.send_errors import classify_send_error_info
@@ -38,7 +36,6 @@ def apply_send_error(session: TelegramSession, exc: Exception) -> None:
 
 
 async def send_message_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     text: str,
@@ -64,7 +61,6 @@ async def send_message_from_session(
 
 
 async def send_post_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     post: Post,
@@ -90,7 +86,6 @@ async def send_post_from_session(
 
 
 async def send_media_from_session(
-    db: Session,
     session: TelegramSession,
     chat_id: int,
     media_items: list[PostMedia],

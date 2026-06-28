@@ -180,7 +180,6 @@ class WorkerService:
 
         try:
             message_id = await self.send_post(
-                db=self.db,
                 session=session,
                 chat_id=job.target_chat.telegram_chat_id,
                 post=job.post,

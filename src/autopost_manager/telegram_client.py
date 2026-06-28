@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from sqlalchemy.orm import Session
 from telethon import TelegramClient
 
 from autopost_manager.models import Post, PostMedia, TelegramSession
@@ -49,14 +48,13 @@ def legacy_session_string(session_path: str | None) -> str:
 
 
 async def send_message_from_session(
-    db: Session,
+    db: object,
     session: TelegramSession,
     chat_id: int,
     text: str,
     parse_mode: str | None,
 ) -> int:
     return await service_send_message_from_session(
-        db=db,
         session=session,
         chat_id=chat_id,
         text=text,
@@ -67,13 +65,12 @@ async def send_message_from_session(
 
 
 async def send_post_from_session(
-    db: Session,
+    db: object,
     session: TelegramSession,
     chat_id: int,
     post: Post,
 ) -> int:
     return await service_send_post_from_session(
-        db=db,
         session=session,
         chat_id=chat_id,
         post=post,
@@ -84,7 +81,7 @@ async def send_post_from_session(
 
 
 async def send_media_from_session(
-    db: Session,
+    db: object,
     session: TelegramSession,
     chat_id: int,
     media_items: list[PostMedia],
@@ -93,7 +90,6 @@ async def send_media_from_session(
     source_created_at: datetime | None = None,
 ) -> int:
     return await service_send_media_from_session(
-        db=db,
         session=session,
         chat_id=chat_id,
         media_items=media_items,

@@ -55,7 +55,7 @@ def test_process_one_job_success_marks_done(monkeypatch, db_session) -> None:
     job = make_job(db_session, post, chat, session=session)
     db_session.commit()
 
-    async def fake_send_post_from_session(db, session, chat_id, post):
+    async def fake_send_post_from_session(session, chat_id, post):
         assert chat_id == -1001
         assert post.body == "hello"
         assert post.parse_mode == "html"
@@ -325,7 +325,7 @@ def test_process_one_job_passes_media_post_to_sender(monkeypatch, db_session) ->
     job = make_job(db_session, post, chat, session=session)
     db_session.commit()
 
-    async def fake_send_post_from_session(db, session, chat_id, post):
+    async def fake_send_post_from_session(session, chat_id, post):
         assert chat_id == -1001
         assert post.media_items[0].file_id == "photo-id"
         return 777
