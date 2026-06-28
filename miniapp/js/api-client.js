@@ -1,11 +1,9 @@
+import { telegramInitData } from "./telegram-webapp.js?v=20260626-14";
+
 const apiPrefix = window.location.pathname.startsWith("/scheduler") ? "/scheduler" : "";
 
 export const restApiBase = `${apiPrefix}/rest/autopost`;
 export const rpcApiBase = `${apiPrefix}/rpc/autopost`;
-
-export function telegramInitData() {
-  return window.Telegram?.WebApp?.initData || "";
-}
 
 function headers() {
   return {

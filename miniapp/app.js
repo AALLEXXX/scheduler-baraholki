@@ -1,13 +1,10 @@
-import { api as requestApi } from "./js/api-client.js?v=20260626-13";
-import { languageStorageKey, supportedLanguages, translations } from "./js/i18n.js?v=20260626-13";
+import { api as requestApi } from "./js/api-client.js?v=20260626-14";
+import { languageStorageKey, supportedLanguages, translations } from "./js/i18n.js?v=20260626-14";
+import { readyTelegramWebApp, telegramWebApp as tg } from "./js/telegram-webapp.js?v=20260626-14";
 
-const tg = window.Telegram?.WebApp;
 const riskyChatSelectionLimit = 15;
 
-if (tg) {
-  tg.ready();
-  tg.expand();
-}
+readyTelegramWebApp();
 
 const state = {
   language: localStorage.getItem(languageStorageKey) || "en",

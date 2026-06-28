@@ -14,7 +14,7 @@ def read(name: str) -> str:
 
 
 def test_miniapp_javascript_has_valid_syntax(tmp_path) -> None:
-    for script in ("app.js", "js/api-client.js", "js/i18n.js"):
+    for script in ("app.js", "js/api-client.js", "js/i18n.js", "js/telegram-webapp.js"):
         module_path = tmp_path / Path(script).name.replace(".js", ".mjs")
         module_path.write_text(read(script), encoding="utf-8")
         result = subprocess.run(
@@ -276,6 +276,19 @@ def test_miniapp_group_search_and_pagination_markup_matches_script() -> None:
     assert "overflow-wrap: anywhere" in css
     assert ".chip-grid" in css
     assert "overflow: hidden" in css
+
+
+def test_miniapp_telegram_webapp_integration_is_isolated() -> None:
+    js = read("app.js")
+    api_js = read("js/api-client.js")
+    telegram_js = read("js/telegram-webapp.js")
+
+    assert 'from "./js/telegram-webapp.js' in js
+    assert 'from "./telegram-webapp.js' in api_js
+    assert "window.Telegram" not in js
+    assert "window.Telegram" not in api_js
+    assert "export const telegramWebApp = window.Telegram?.WebApp;" in telegram_js
+    assert "export function telegramInitData()" in telegram_js
 
 
 def test_miniapp_mobile_layout_keeps_status_and_form_inside_viewport() -> None:
